@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>财务中心 · 星逸平台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+
+<div class="bar1">
+  <a class="bd" href="#" id="backPortal" title="返回星逸平台">
+    <span class="logo">财</span>
+    <span class="bt"><b>财务中心</b><i>FSSC · v1.0</i></span>
+  </a>
+  <div class="dom" id="domNav"></div>
+  <div class="rt">
+    <button class="ibtn" id="themeBtn" title="切换主题">◐</button>
+    <div class="who"><span class="av" id="uAv">潘</span><span class="ut"><b id="uNm">潘海鹏</b><i id="uRl">财务经理</i></span></div>
+  </div>
+</div>
+<div class="bar2">
+  <div class="sub" id="subNav"></div>
+  <span class="sp"></span>
+  <div class="ctx">
+    <div class="sel">主体 <b>全部</b></div>
+    <div class="sel">期间 <b id="curPeriod">—</b></div>
+  </div>
+</div>
+
+<div class="wrap" id="view"></div>
+<div class="toast" id="toast"></div>
+<input type="file" id="filePick" accept=".csv,.txt,.tsv,.xlsx" hidden>
+
+<script src="./lib/xlsx-lite.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>

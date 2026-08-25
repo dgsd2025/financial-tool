@@ -1,0 +1,11 @@
+{
+  "name": "yc-finance-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "财务中心 · 星逸平台（一期：系统结构 + 工具箱）",
+  "scripts": {
+    "dev": "node server.js 5180",
+    "start": "node server.js 5180"
+  },
+  "engines": { "node": ">=16" }
+}

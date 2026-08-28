@@ -229,7 +229,10 @@ function addLog(entry) { const l = loadLog(); l.unshift(entry); saveLog(l); }
 /* ============ T2 状态 ============ */
 const T2 = {
   step: 1, rows: null, headRow: 0, map: {}, file: null,
-  ent: '', entId: '', line: '', acctNo: '', vchWord: '记', defProj: '',
+  // acctId = T1 账户台账里的账户 id（账户主数据的唯一真相源在 T1）
+  // acctNo = 从该账户带出来的账号文本，只用于凭证备注列和银行存款科目匹配
+  ent: '', entId: '', line: '', acctId: '', acctNo: '', vchWord: '记', defProj: '',
+  balPush: null,   // 余额回写结果，步骤 3 里摊开说
   result: null, tab: 'ok'
 };
 
@@ -561,6 +564,70 @@ function t2Step1() {
     <div class="note w" style="margin:12px 0 0"><b>工具不替你做的：</b>不猜科目、不自动入账、不碰网银。生成的是<b>草稿</b>，导入账务系统前请复核。</div>`)}`;
 }
 
+/* 当前主体的简称——T1 账户台账用简称存主体（「优栖」），ENTITIES 里存全称 */
+const t2EntShort = () => {
+  const e = ENTITIES.find(x => x.id === T2.entId);
+  return e ? e.short : '';
+};
+/* 选定收付账户：只记 id，账号文本从 T1 台账带出来（账号为空就退回用账户名） */
+function t2SetAcct(id) {
+  T2.acctId = id || '';
+  const a = (typeof t1AccById === 'function' && id) ? t1AccById(id) : null;
+  T2.acctNo = a ? (a.no || a.name) : '';
+}
+/* 收付账户下拉：账户主数据只在 T1 台账里存一份，这里只引用，不自己存 */
+function t2AcctSelect() {
+  if (!T2.entId) {
+    return '<select disabled><option>— 请先选主体 —</option></select>';
+  }
+  const accs = (typeof t1Accounts === 'function') ? t1Accounts(t2EntShort()) : [];
+  if (!accs.length) {
+    return '<select disabled><option>— 该主体在 T1 台账里没有在管账户 —</option></select>'
+      + '<div class="mut" style="font-size:11px;margin-top:4px">去 <b>T1 资金日报 → 账户台账</b> 添加，这里就能选到</div>';
+  }
+  return `<select id="acctSel"><option value="">— 请选择 —</option>${accs.map(a =>
+    `<option value="${a.id}" ${T2.acctId === a.id ? 'selected' : ''}>${H(a.name)}${a.no ? ' · ' + H(a.no) : ''}</option>`
+  ).join('')}</select>`
+    + '<div class="mut" style="font-size:11px;margin-top:4px">来自 T1 账户台账。跑完流水，期末余额会回写到 T1 当日余额。</div>';
+}
+
+/* 从流水里取期末余额。
+   坑：网银导出有正序也有倒序的，同一天多笔时「最后一笔」在文件里可能是第一行。
+   所以先比首末两行判断排序方向，再决定同日取哪一行，不能闭眼取最后一行。 */
+function t2ClosingBal() {
+  const { rows, headRow, map } = T2;
+  if (!rows || map.bal === undefined || map.date === undefined) return null;
+  const body = rows.slice(headRow + 1)
+    .map(r => ({ d: normDate(r[map.date]), raw: r[map.bal] }))
+    .filter(x => x.d && String(x.raw == null ? '' : x.raw).trim() !== '');
+  if (!body.length) return null;
+  const asc = body[0].d <= body[body.length - 1].d;
+  const maxD = body.reduce((m, x) => (x.d > m ? x.d : m), body[0].d);
+  const sameDay = body.filter(x => x.d === maxD);
+  const pick = asc ? sameDay[sameDay.length - 1] : sameDay[0];
+  return { date: maxD, val: numOf(pick.raw), asc };
+}
+
+/* 把期末余额回写到 T1 的当日余额。
+   那天已有手工录的数且对不上时先问，不静默覆盖。 */
+function t2PushBalance() {
+  T2.balPush = null;
+  if (typeof t1PutBalance !== 'function' || !T2.acctId) return;
+  const cb = t2ClosingBal();
+  if (!cb) { T2.balPush = { skip: 1 }; return; }
+  let r = t1PutBalance(T2.acctId, cb.date, cb.val, 'T2');
+  if (r.conflict) {
+    const diff = cb.val - r.old;
+    const ok = confirm(
+      `${cb.date} 这天 T1 里已经有余额 ${money(r.old)}，\n`
+      + `流水算出来的期末余额是 ${money(cb.val)}，差 ${(diff >= 0 ? '+' : '') + money(diff)}。\n\n`
+      + `用流水的数覆盖吗？\n取消 = 保留原来手工录的数。`);
+    if (!ok) { T2.balPush = { kept: 1, date: cb.date, val: cb.val, old: r.old }; return; }
+    r = t1PutBalance(T2.acctId, cb.date, cb.val, 'T2', 1);
+  }
+  T2.balPush = r.ok ? { ok: 1, date: cb.date, val: cb.val } : { err: r.reason };
+}
+
 function t2Step2() {
   const rows = T2.rows, hr = T2.headRow;
   const header = rows[hr] || [];
@@ -592,13 +659,26 @@ function t2Step2() {
           <select id="lineSel"><option value="">— 不指定 —</option>${LINES.map(e => `<option ${T2.line === e ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
           <div class="field"><label class="fl">默认项目（摘要与户名都认不出时用）</label>
           <select id="defProj"><option value="">— 不设，认不出就进例外 —</option>${PROJECTS().map(p => `<option value="${p.code}" ${T2.defProj === p.code ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div></div>
-        <div><div class="field"><label class="fl">银行账号（备注用）</label><input type="text" id="acctNo" value="${H(T2.acctNo)}" placeholder="如 6222...1234"></div>
+        <div><div class="field"><label class="fl">收付账户 <span class="red">*</span></label>
+          ${t2AcctSelect()}</div>
           <div class="field"><label class="fl">凭证字</label><input type="text" id="vchWord" value="${H(T2.vchWord)}"></div></div>
       </div>`)}
     <div style="display:flex;gap:9px;justify-content:flex-end;margin-top:6px">
       <button class="btn pri" data-act="t2run" ${ready ? '' : 'disabled'}>下一步：匹配规则</button>
     </div>
     ${ready ? '' : `<div class="note c" style="margin-top:11px"><b>还不能继续：</b>日期、摘要、以及至少一个金额列（收入/支出，或发生额）必须对应上。</div>`}`;
+}
+
+/* 余额回写结果，摊开说清楚写没写、写到哪个账户哪一天 */
+function t2BalNote() {
+  const p = T2.balPush;
+  if (!p) return '';
+  const acc = (typeof t1AccById === 'function') ? t1AccById(T2.acctId) : null;
+  const who = acc ? `${H(acc.ent)} · ${H(acc.name)}` : T2.acctId;
+  if (p.skip) return `<div class="note"><b>T1 余额没动。</b>这份流水里没有余额列（或余额列是空的），工具不会替你估——去 T1 手工录一下 ${who} 的余额。</div>`;
+  if (p.err) return `<div class="note c"><b>余额没能写进 T1：</b>${H(p.err)}</div>`;
+  if (p.kept) return `<div class="note w"><b>保留了 T1 原来的手工余额。</b>${who} ${p.date}：T1 是 ${money(p.old)}，流水期末是 ${money(p.val)}，差 ${money(p.val - p.old)}。你选了不覆盖——两边现在对不上，建议查一下是漏了一笔还是流水不全。</div>`;
+  return `<div class="note g"><b>已回写 T1 当日余额。</b>${who} ${p.date} 期末余额 ${money(p.val)}，在 T1 里标了「来自 T2 流水」。</div>`;
 }
 
 function t2Step3() {
@@ -614,6 +694,7 @@ function t2Step3() {
   ])
     + (ex.length ? `<div class="note w"><b>有 ${ex.length} 笔没匹配上。</b>工具不会替你猜科目——下一步逐条处理，处理完还能存成规则，下次就自动了。</div>`
       : `<div class="note g"><b>全部匹配成功。</b>可以直接进入导出。</div>`)
+    + t2BalNote()
     + `<div class="tabs">
         <button data-tab="ok" class="${T2.tab === 'ok' ? 'on' : ''}">已匹配<span class="cnt">${ok.length}</span></button>
         <button data-tab="ex" class="${T2.tab === 'ex' ? 'on' : ''}">例外<span class="cnt">${ex.length}</span></button>
@@ -812,7 +893,10 @@ function bindDynamic() {
       go('t2');
     };
   });
-  ['entSel2:ent', 'lineSel:line', 'acctNo:acctNo', 'vchWord:vchWord', 'defProj:defProj'].forEach(p => {
+  // 收付账户：选的是 T1 账户 id，账号文本从台账带出来，不让用户重复手填
+  const accSel = $('acctSel');
+  if (accSel) accSel.onchange = () => { t2SetAcct(accSel.value); go('t2'); };
+  ['entSel2:ent', 'lineSel:line', 'vchWord:vchWord', 'defProj:defProj'].forEach(p => {
     const [id, key] = p.split(':');
     const el = $(id);
     if (el) el.onchange = () => {
@@ -821,6 +905,7 @@ function bindDynamic() {
         const ei = ENTITIES.find(x => x.id === T2.entId);
         T2.ent = ei ? ei.full : '';
         useRuleSet(T2.entId); T2.defProj = defaultProjOf();
+        t2SetAcct('');   // 账户按主体分，换主体原来选的账户就不成立了
         go('t2');
       } else T2[key] = el.value;
     };
@@ -852,20 +937,22 @@ document.addEventListener('click', e => {
   if (!a) return;
   const act = a.dataset.act;
 
-  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {} }); go('t2'); }
+  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {}, balPush: null }); go('t2'); }
   else if (act === 't2run') {
     T2.entId = ($('entSel2') || {}).value || T2.entId;
     const ei = ENTITIES.find(x => x.id === T2.entId);
     T2.ent = ei ? ei.full : '';
     T2.line = ($('lineSel') || {}).value || T2.line;
-    T2.acctNo = ($('acctNo') || {}).value || '';
+    t2SetAcct(($('acctSel') || {}).value || T2.acctId);
     T2.vchWord = ($('vchWord') || {}).value || '记';
     T2.defProj = ($('defProj') || {}).value || '';
     if (!T2.entId) { toast('请先选择这批流水属于哪个主体'); return; }
+    if (!T2.acctId) { toast('请选择这批流水是哪个账户的——余额要回写到 T1 那个账户上', 4200); return; }
     if (!useRuleSet(T2.entId)) {
       toast('「' + T2.ent + '」还没有规则库，全部会进例外', 4200);
     }
-    runRules(); T2.step = 3; T2.tab = T2.result.ex.length ? 'ex' : 'ok'; go('t2');
+    runRules(); t2PushBalance();
+    T2.step = 3; T2.tab = T2.result.ex.length ? 'ex' : 'ok'; go('t2');
   }
   else if (act === 't2ex') { T2.step = 4; go('t2'); }
   else if (act === 't2back3') { T2.step = 3; go('t2'); }

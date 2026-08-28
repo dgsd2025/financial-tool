@@ -40,7 +40,7 @@ const T1 = { date: new Date().toISOString().slice(0, 10), view: 'daily', filterE
 
 function t1LoadAcc() {
   try { const s = JSON.parse(localStorage.getItem(T1_ACC_KEY) || 'null'); if (s && s.length) return s; } catch (e) { /* 忽略 */ }
-  const init = T1_PRESET.map((p, i) => ({ id: 'A' + String(i + 1).padStart(3, '0'), ent: p[0], name: p[1], type: p[2], on: 1 }));
+  const init = T1_PRESET.map((p, i) => ({ id: 'A' + String(i + 1).padStart(3, '0'), ent: p[0], name: p[1], type: p[2], no: '', on: 1 }));
   t1SaveAcc(init); return init;
 }
 function t1SaveAcc(a) { try { localStorage.setItem(T1_ACC_KEY, JSON.stringify(a)); } catch (e) { toast('账户台账保存失败'); } }
@@ -104,6 +104,49 @@ function t1ByEnt(date) {
 }
 
 const wan = n => (n / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/* ============ 给 T2 用的接口 ============ */
+/* 账户主数据只有 T1 这一份，T2 不自己存账户，只通过下面两个函数引用。
+   放在这里是为了让「谁在用 T1 的账户」一眼可见——改这两个函数前先看 T2 的调用点。 */
+
+/** 某主体的在管账户列表（T2 步骤 2 的账户下拉用）。ent 传主体简称，如「优栖」 */
+function t1Accounts(ent) {
+  return T1_ACC.filter(a => a.on && (!ent || a.ent === ent));
+}
+/** 按 id 取账户 */
+const t1AccById = id => T1_ACC.find(a => a.id === id) || null;
+
+/* 余额来源留痕：哪些余额是 T2 流水带进来的，T1 界面上要标出来，
+   否则用户分不清哪个数是自己抄的、哪个是机器填的。 */
+const T1_SRC_KEY = 'fsc_t1_balsrc_v1';
+function t1LoadSrc() { try { return JSON.parse(localStorage.getItem(T1_SRC_KEY) || '{}'); } catch (e) { return {}; } }
+function t1SaveSrc(s) { try { localStorage.setItem(T1_SRC_KEY, JSON.stringify(s)); } catch (e) { /* 忽略 */ } }
+
+/**
+ * 把某账户某天的余额写进 T1。
+ * 不传 force 时遇到「那天已有值且和新值对不上」不写，返回 conflict 让调用方去问用户，
+ * 避免静默盖掉手工抄的数。
+ * @returns {{ok:boolean, conflict?:boolean, old?:number, val?:number, reason?:string}}
+ */
+function t1PutBalance(accId, date, val, from, force) {
+  const acc = t1AccById(accId);
+  if (!acc) return { ok: false, reason: '账户不存在：' + accId };
+  if (!date || isNaN(Number(val))) return { ok: false, reason: '日期或金额无效' };
+  const day = t1LoadDay();
+  const d = day[date] || (day[date] = {});
+  const old = d[accId];
+  if (old !== undefined && Math.abs(old - val) > 0.005 && !force) {
+    return { ok: false, conflict: true, old, val };
+  }
+  d[accId] = Number(val);
+  t1SaveDay(day);
+  const src = t1LoadSrc();
+  (src[date] || (src[date] = {}))[accId] = from || 'T2';
+  t1SaveSrc(src);
+  return { ok: true, val: Number(val) };
+}
+/** 该余额是不是 T2 带进来的 */
+const t1BalFrom = (date, accId) => (t1LoadSrc()[date] || {})[accId] || '';
 
 /* ============ 界面 ============ */
 S['t1'] = () => {
@@ -171,11 +214,14 @@ S['t1-entry'] = () => {
     const rows = accs.map(a => {
       const e = eff[a.id];
       const cur = today[a.id];
+      const src = t1BalFrom(T1.date, a.id);
       const hint = e.v === null ? '<span class="red">从未录入</span>'
-        : (cur !== undefined ? pill('今日已填', 'ok')
+        : (cur !== undefined
+          ? (src ? pill('来自 ' + src + ' 流水', 'ok') : pill('今日已填', 'ok'))
           : `<span class="mut">上次 ${H(e.from)}：${money(e.v)}</span>`);
       return [
-        `${a.type === 'plat' ? '▣' : '▤'} ${H(a.name)}`,
+        `${a.type === 'plat' ? '▣' : '▤'} ${H(a.name)}`
+        + (a.no ? `<div class="mut" style="font-size:11px">${H(a.no)}</div>` : ''),
         `<input type="number" step="0.01" class="t1in" data-t1cell="${a.id}" value="${cur !== undefined ? cur : ''}" placeholder="${e.v !== null ? money(e.v) : '—'}">`,
         hint,
       ];
@@ -199,6 +245,7 @@ S['t1-acc'] = () => {
     `<span class="code">${a.id}</span>`,
     `<input class="t1in wide" data-t1acc="${a.id}:ent" value="${H(a.ent)}">`,
     `<input class="t1in wide" data-t1acc="${a.id}:name" value="${H(a.name)}">`,
+    `<input class="t1in wide" data-t1acc="${a.id}:no" value="${H(a.no || '')}" placeholder="选填">`,
     `<select data-t1acc="${a.id}:type"><option value="bank" ${a.type === 'bank' ? 'selected' : ''}>银行</option><option value="plat" ${a.type === 'plat' ? 'selected' : ''}>平台</option></select>`,
     `<label style="font-size:11px;white-space:nowrap"><input type="checkbox" data-t1on="${a.id}" ${a.on ? 'checked' : ''}> 在管</label>`,
     `<button class="btn sm" data-t1del="${a.id}">删除</button>`,
@@ -214,8 +261,9 @@ S['t1-acc'] = () => {
      <button class="btn" data-t1act="addAcc">+ 新增账户</button>
      <button class="btn pri" data-t1act="saveAcc">保存台账</button>`)
     + `<div class="note"><b>预置了 ${T1_PRESET.length} 个账户</b>（按访谈里 47 户的结构估的），实际户名和数量请按你们真实情况改。<b>停用的账户不进日报</b>，但历史数据保留。</div>`
+    + `<div class="note"><b>账号填了才能在 T2 里选到这个账户。</b>T2 导流水时从这张台账选账户——账户主数据只有这一份，两边永远对得上。填了账号的账户，凭证里的银行存款科目也靠它自动对上。</div>`
     + card('账户', table(
-      [{ t: '编号' }, { t: '主体' }, { t: '账户 / 平台' }, { t: '类型' }, { t: '状态' }, { t: '' }], rows))
+      [{ t: '编号' }, { t: '主体' }, { t: '账户 / 平台' }, { t: '账号' }, { t: '类型' }, { t: '状态' }, { t: '' }], rows))
     + card('各主体月固定支出（算覆盖倍数用）', table(
       [{ t: '主体' }, { t: '月固定支出（元）', n: 1 }, { t: '折合' }], fixRows));
 };

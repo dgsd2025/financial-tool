@@ -130,7 +130,10 @@ const RS_YOUQI = {
       note: '银行直收、未先挂应收的，确认收入并拆销项税' },
     // 水电费收入：借银行存款，贷主营业务收入，贷销项税（贵司口径）
     { kw: '水费|电费|水电|代收电费|代收水费', dir: 'in', acct: '5001_{p}', memo: '收水电费', tax: 0.01,
-      note: '按贵司分录：借银行存款 / 贷主营业务收入 + 贷销项税额' },
+      proj: '1001',
+      note: '按贵司分录：借银行存款 / 贷主营业务收入 + 贷销项税额。' +
+            '水电代收只发生在花都，项目定死 1001，不吃全局默认项目；' +
+            '但摘要里明写冼村的仍按摘要走' },
     // 押金
     { kw: '收.*押金|收到.*押金|押金', dir: 'in', acct: '224101_{p}', memo: '收押金',
       warn: '押金是负债不是收入' },
@@ -197,9 +200,10 @@ function isStaff(opp) {
 }
 
 /* ============ 规则库（按主体分开存） ============ */
-/* v3：工资按在编员工名单分流 + 主体默认项目。
+/* v4：水电收入规则定死花都项目。
+   v3：工资按在编员工名单分流 + 主体默认项目。
    版本号必须随预置规则变更递增，否则老用户浏览器里缓存的旧规则不会更新。 */
-const RULE_KEY = e => 'fsc_t2_rules_' + e + '_v3';
+const RULE_KEY = e => 'fsc_t2_rules_' + e + '_v4';
 const LOG_KEY = 'fsc_t2_log_v1';
 
 function loadRules(entId) {
@@ -331,11 +335,14 @@ function runRules() {
       return false;
     });
     if (!hit) { rec.why = '摘要未命中任何规则'; ex.push(rec); return; }
-    // 项目识别：摘要 → 对方户名 → 业主名单 → 用户设的默认项目
+    // 项目识别，优先级从高到低：
+    // 摘要 → 对方户名 → 业主名单 → 规则自带的固定项目 → 用户设的全局默认项目
+    // 规则固定项目排在全局默认之上：某些业务只发生在一个项目（如水电代收只在花都），
+    // 但摘要里明写了别的项目时，仍以摘要为准。
     const oc = ownerProj(opp);
+    const byCode = c => (c ? PROJECTS().find(p => p.code === c) : null);
     const proj = detectProj(memo) || detectProj(opp)
-      || (oc ? PROJECTS().find(p => p.code === oc) : null)
-      || (T2.defProj ? PROJECTS().find(p => p.code === T2.defProj) : null);
+      || byCode(oc) || byCode(hit.proj) || byCode(T2.defProj);
     rec.rule = hit; rec.vmemo = hit.memo || memo; rec.hitField = hitField;
     rec.proj = proj;
     rec.tax = hit.tax || 0; rec.red = hit.red || 0;

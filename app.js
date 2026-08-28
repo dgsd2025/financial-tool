@@ -1,5 +1,5 @@
 /* 财务中心 · 星逸平台
-   一期：系统结构 + 工具箱（仅 T2 银行流水转凭证可用）
+   一期：系统结构 + 工具箱（已上线哪些工具，以 TOOLS 里的 ready 标记为唯一口径）
    全部逻辑在浏览器端运行，数据不出本机 */
 'use strict';
 
@@ -445,7 +445,8 @@ function runRules() {
     }
     ok.push(rec);
   });
-  T2.result = { ok, ex, total: body.length };
+  // file 用来防错配：上传了新文件但还没重新转换时，旧 result 不能拿去存流水明细
+  T2.result = { ok, ex, total: body.length, file: T2.file ? T2.file.name : '' };
   // 命中计数
   ok.forEach(r => { const t = RULES.find(x => x.id === r.rule.id); if (t) t.hits = (t.hits || 0) + 1; });
   saveRules(T2.entId, RULES);
@@ -576,7 +577,7 @@ const S = {};
 
 S['home'] = () => head('工作台', '一期已上线「工具箱」。其余功能域为二期规划，点击可查看规划说明。', '')
   + kpis([
-    { k: '已上线工具', v: String(TOOLS.filter(t => t.ready).length), u: '个', t: 'g', d: 'T2 · T4' },
+    { k: '已上线工具', v: String(TOOLS.filter(t => t.ready).length), u: '个', t: 'g', d: TOOLS.filter(t => t.ready).map(t => t.id).join(' · ') },
     { k: '规划中工具', v: String(TOOLS.filter(t => !t.ready).length), u: '个' },
     { k: '已上线合计月省', v: String(TOOLS.filter(t => t.ready).reduce((s, t) => s + t.save, 0)), u: 'h', t: 'g' },
     { k: 'T2 规则库', v: String(RULES.length), u: '条', d: '可持续累积' },
@@ -597,22 +598,28 @@ function toolCard(t) {
   </button>`;
 }
 
-S['tool-list'] = () => head('我的工具', '工具箱是常设能力——新工具会持续加进来。当前已上线 1 个，其余按方案排期逐个开发。', '工具箱')
-  + `<div class="note g"><b>先跑通一个再做下一个。</b>T2 用顺了、规则库养起来了，再开 T3。这样每个工具上线时都能真正被用起来，而不是堆一堆没人用的功能。</div>`
+S['tool-list'] = () => head('我的工具', `工具箱是常设能力——新工具会持续加进来。当前已上线 ${TOOLS.filter(t => t.ready).length} 个，其余按方案排期逐个开发。`, '工具箱')
+  + `<div class="note g"><b>先跑通一个再做下一个。</b>上线的工具用顺了、复盘达标了，再开下一个。这样每个工具上线时都能真正被用起来，而不是堆一堆没人用的功能。</div>`
   + `<div class="tgrid">${TOOLS.map(toolCard).join('')}</div>`;
 
-S['tool-plan'] = () => head('开发排期', '十个工具分三批。当前处于第一批第 1 个。', '工具箱')
-  + card('排期', table(
-    [{ t: '批次' }, { t: '工具' }, { t: '状态' }, { t: '可省', n: 1 }],
-    [
-      ['第一批', 'T2 银行流水转凭证', pill('已上线', 'ok'), '24 h/月'],
-      ['第一批', 'T3 对账单核对器', pill('待开发', 'mu'), '22 h/月'],
-      ['第一批', 'T1 资金日报生成器', pill('待开发', 'mu'), '20 h/月'],
-      ['第一批', 'T5 商品对码工具', pill('待开发', 'mu'), '前置'],
-      ['第二批', 'T4 / T8 / T6 / T9', pill('规划中', 'mu'), '54 h/月'],
-      ['第三批', 'T10 / T7', pill('规划中', 'mu'), '4 h/月'],
-    ]))
-  + `<div class="note"><b>推进原则：</b>跑完一个、用好一个，再开下一个。每个工具上线一个月后复盘实测节省，达成率低于 70% 的先优化再往下走。</div>`;
+S['tool-plan'] = () => {
+  // 状态从 TOOLS 的 ready 标记派生，不再手写——手写的排期表跟实际上线状态对不上过一次（T1 已上线仍标待开发）
+  const st = id => { const t = TOOLS.find(x => x.id === id); return t && t.ready ? pill('已上线', 'ok') : pill('待开发', 'mu'); };
+  const live = TOOLS.filter(t => t.ready);
+  return head('开发排期', `十个工具分三批。已上线 <b>${live.length}</b> 个（${live.map(t => t.id).join(' · ')}）。`, '工具箱')
+    + card('排期', table(
+      [{ t: '批次' }, { t: '工具' }, { t: '状态' }, { t: '可省', n: 1 }],
+      [
+        ['第一批', 'T2 银行流水转凭证', st('T2'), '24 h/月'],
+        ['第一批', 'T3 对账单核对器', st('T3'), '22 h/月'],
+        ['第一批', 'T1 资金日报生成器', st('T1'), '20 h/月'],
+        ['第一批', 'T5 商品对码工具', st('T5'), '前置'],
+        ['第二批', 'T4 日损益速算表', st('T4'), '35 h/月'],
+        ['第二批', 'T8 / T6 / T9', pill('规划中', 'mu'), '19 h/月'],
+        ['第三批', 'T10 / T7', pill('规划中', 'mu'), '4 h/月'],
+      ]))
+    + `<div class="note"><b>推进原则：</b>跑完一个、用好一个，再开下一个。每个工具上线一个月后复盘实测节省，达成率低于 70% 的先优化再往下走。</div>`;
+};
 
 /* 规则库界面 */
 S['tool-rules'] = () => {
@@ -815,6 +822,27 @@ function t2PushBalance() {
     r = t1PutBalance(T2.acctId, cb.date, cb.val, 'T2', 1);
   }
   T2.balPush = r.ok ? { ok: 1, accId: T2.acctId, date: cb.date, val: cb.val } : { err: r.reason };
+}
+
+/* 把这批解析出的流水明细存给 T1（余额下钻「看每一笔」用）。
+   换账户重存时，先把上一次写错账户的那几天撤掉——跟余额回写同一个纪律。 */
+function t2PushTxns() {
+  if (typeof t1PutTxns !== 'function' || !T2.acctId || !T2.result) return;
+  if (!T2.file || T2.result.file !== T2.file.name) return;   // result 是上一个文件的，别写
+  const prev = T2.txnPush;
+  if (prev && prev.accId && prev.accId !== T2.acctId && typeof t1DelTxns === 'function') {
+    t1DelTxns(prev.accId, prev.dates);
+  }
+  const map = T2.map;
+  const recs = T2.result.ok.concat(T2.result.ex)
+    .filter(r => r.date && r.amt > 0)   // 没日期/没金额的行（合计行、说明行）进不了按天分桶
+    .map(r => ({
+      date: r.date, memo: r.memo, dir: r.dir, amt: r.amt, opp: r.opp, ref: r.ref,
+      bal: (map.bal !== undefined && r.raw && cellHasAmt(r.raw[map.bal])) ? numOf(r.raw[map.bal]) : null,
+    }));
+  if (!recs.length) return;
+  t1PutTxns(T2.acctId, T2.file.name, recs);
+  T2.txnPush = { accId: T2.acctId, dates: [...new Set(recs.map(r => r.date))] };
 }
 
 /* 上传后自动认账户的结果，连同余额有没有写进 T1，一并摊开说 */
@@ -1134,7 +1162,7 @@ function bindDynamic() {
   const accSel = $('acctSel');
   if (accSel) accSel.onchange = () => {
     t2SetAcct(accSel.value);
-    if (T2.acctId) t2PushBalance();   // 换了账户，余额得写到新账户上
+    if (T2.acctId) { t2PushBalance(); t2PushTxns(); }   // 换了账户，余额和流水明细都得搬到新账户上
     go('t2');
   };
   ['entSel2:ent', 'lineSel:line', 'vchWord:vchWord', 'defProj:defProj'].forEach(p => {
@@ -1193,7 +1221,7 @@ document.addEventListener('click', e => {
     if (!useRuleSet(T2.entId)) {
       toast('「' + T2.ent + '」还没有规则库，全部会进例外', 4200);
     }
-    runRules(); t2PushBalance();
+    runRules(); t2PushBalance(); t2PushTxns();
     T2.step = 3; T2.tab = T2.result.ex.length ? 'ex' : 'ok'; go('t2');
   }
   else if (act === 't2ex') { T2.step = 4; go('t2'); }
@@ -1247,7 +1275,7 @@ document.addEventListener('click', e => {
     if (typeof t1BindAcctNo === 'function' && t1BindAcctNo(T2.acctId, T2.sniffNo)) {
       t2SetAcct(T2.acctId);
       T2.autoBind = { accId: T2.acctId, ent: (t1AccById(T2.acctId) || {}).ent, name: (t1AccById(T2.acctId) || {}).name, no: T2.sniffNo };
-      t2PushBalance();
+      t2PushBalance(); t2PushTxns();
       toast('卡号已记进 T1 台账，下次上传自动认出来', 4200); go('t2');
     } else toast('没能写进台账');
   }

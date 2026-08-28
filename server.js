@@ -67,7 +67,7 @@ server.listen(PORT, () => {
   console.log('  财务中心 · 已启动');
   console.log('  http://localhost:' + PORT);
   console.log('');
-  console.log('  一期：系统结构 + 工具箱（T2 银行流水转凭证）');
+  console.log('  一期：系统结构 + 工具箱（T1 资金日报 · T2 流水转凭证 · T3 对账核对 · T4 日损益）');
   console.log('  停止：Ctrl+C');
   console.log('');
 });

@@ -1,5 +1,7 @@
 /* T1 资金日报生成器
-   账户台账预置 → 每日只填变动的 → 三级汇总 + 覆盖倍数红线 → 一键生成钉钉文本
+   账户台账预置 → 每日只填变动的 → 三级汇总 + 变动率预警/覆盖红线 → 一键生成钉钉文本
+   分布表按主体出「较上日变动率」，超阈值（默认 ±10%）标预警；
+   余额可下钻：主体 → 账户 → T2 导入留存的流水明细。
    诚实定位：登网银抄余额这步省不掉，工具省的是抄完之后的汇总/算/排版/发。
    依赖 app.js 的工具函数。 */
 'use strict';
@@ -36,7 +38,7 @@ const T1_FIXED = {
   集包厂: 920000, 昌记云泰: 120000, 牧童: 90000, 新艺文化: 140000,
 };
 
-const T1 = { date: new Date().toISOString().slice(0, 10), view: 'daily', filterEnt: '', imp: null };
+const T1 = { date: new Date().toISOString().slice(0, 10), view: 'daily', filterEnt: '', imp: null, drillEnt: '', drillAcc: '' };
 
 function t1LoadAcc() {
   try { const s = JSON.parse(localStorage.getItem(T1_ACC_KEY) || 'null'); if (s && s.length) return s; } catch (e) { /* 忽略 */ }
@@ -47,8 +49,11 @@ function t1SaveAcc(a) { try { localStorage.setItem(T1_ACC_KEY, JSON.stringify(a)
 let T1_ACC = t1LoadAcc();
 
 function t1LoadCfg() {
-  try { const s = JSON.parse(localStorage.getItem(T1_CFG_KEY) || 'null'); if (s) return s; } catch (e) { /* 忽略 */ }
-  return { ratio: 1.5, fixed: { ...T1_FIXED } };
+  try {
+    const s = JSON.parse(localStorage.getItem(T1_CFG_KEY) || 'null');
+    if (s) { if (s.rateTh === undefined) s.rateTh = 10; return s; }   // 老配置补默认阈值
+  } catch (e) { /* 忽略 */ }
+  return { ratio: 1.5, rateTh: 10, fixed: { ...T1_FIXED } };
 }
 function t1SaveCfg(c) { try { localStorage.setItem(T1_CFG_KEY, JSON.stringify(c)); } catch (e) { /* 忽略 */ } }
 let T1_CFG = t1LoadCfg();
@@ -99,6 +104,9 @@ function t1ByEnt(date) {
     e.incomplete = e.miss > 0;
     e.cover = (e.fixed && !e.incomplete) ? e.bal / e.fixed : null;
     e.red = e.cover !== null && e.cover < T1_CFG.ratio;
+    // 较上日变动率：上一日合计为 0（或没有上一日）时分母不成立，不算、不报警
+    e.rate = (prevEff && e.prev > 0.005) ? (e.bal - e.prev) / e.prev * 100 : null;
+    e.rateWarn = e.rate !== null && Math.abs(e.rate) >= (T1_CFG.rateTh || 10);
   });
   return Object.values(m).sort((a, b) => b.bal - a.bal);
 }
@@ -187,6 +195,71 @@ function t1ClearBalance(accId, date, from, expectVal) {
   if (src[date]) { delete src[date][accId]; if (!Object.keys(src[date]).length) delete src[date]; }
   t1SaveSrc(src);
   return true;
+}
+
+/* 流水明细留存：T2 每转换一批，就把解析出的流水按「账户 + 交易日」存一份，
+   T1 里点余额下钻时能看到每一笔是什么。余额是结论，流水是物证。
+   同账户同一天重复导入 = 整天替换，不累加，所以重传同一份文件不会翻倍。 */
+const T1_TXN_KEY = 'fsc_t1_txns_v1';
+function t1LoadTxns() { try { return JSON.parse(localStorage.getItem(T1_TXN_KEY) || '{}'); } catch (e) { return {}; } }
+function t1SaveTxns(t) {
+  try { localStorage.setItem(T1_TXN_KEY, JSON.stringify(t)); return true; }
+  catch (e) {
+    // 空间不够：全局掐掉最老的一半日期再试一次，再不行就放弃——余额不受影响。
+    // 掐掉了什么必须说出来，静默清数据会让用户以为明细一直都在
+    const all = [];
+    Object.keys(t).forEach(id => Object.keys(t[id]).forEach(d => all.push([id, d])));
+    all.sort((x, y) => (x[1] < y[1] ? -1 : 1));
+    const cut = all.slice(0, Math.ceil(all.length / 2));
+    cut.forEach(([id, d]) => { delete t[id][d]; });
+    try {
+      localStorage.setItem(T1_TXN_KEY, JSON.stringify(t));
+      toast(`流水明细空间不足，已清掉最旧的 ${cut.length} 天（余额不受影响）`, 4600);
+      return true;
+    }
+    catch (e2) { toast('流水明细存不下了，本批未保存（余额不受影响）', 4200); return false; }
+  }
+}
+/** T2 转换完调这个存明细。recs: [{date,memo,dir,amt,opp,ref,bal}]，bal 是该笔发生后的账面余额（可为 null） */
+function t1PutTxns(accId, fileName, recs) {
+  if (!t1AccById(accId) || !recs || !recs.length) return 0;
+  const all = t1LoadTxns();
+  const mine = all[accId] = all[accId] || {};
+  const byDate = {};
+  recs.forEach(r => {
+    if (!r.date || !(r.amt > 0)) return;
+    (byDate[r.date] = byDate[r.date] || []).push({
+      memo: r.memo || '', opp: r.opp || '', dir: r.dir === 'in' ? 'in' : 'out',
+      amt: Number(r.amt) || 0, ref: r.ref || '',
+      bal: (r.bal === null || r.bal === undefined || isNaN(r.bal)) ? null : Number(r.bal),
+    });
+  });
+  let n = 0;
+  const at = new Date().toLocaleString('zh-CN');
+  Object.keys(byDate).forEach(d => {
+    // total 记原始笔数：超 800 截断时页面要如实标出来，不能让截过的「当日合计」冒充全量
+    mine[d] = { file: String(fileName || ''), at, total: byDate[d].length, rows: byDate[d].slice(0, 800) };
+    n += mine[d].rows.length;
+  });
+  // 每个账户最多留 62 天（约两个月），从最老的掐——localStorage 就那么大
+  const ds = Object.keys(mine).sort();
+  while (ds.length > 62) { delete mine[ds.shift()]; }
+  return t1SaveTxns(all) ? n : 0;
+}
+/** T2 换绑账户时，把写错账户的那几天撤掉（和 t1ClearBalance 同一个纪律）。
+    传了 expectFile 就只删「确实是那份文件写进来的」桶——桶已被别的批次覆盖时不动，防误删 */
+function t1DelTxns(accId, dates, expectFile) {
+  if (!accId || !dates || !dates.length) return;
+  const all = t1LoadTxns();
+  if (!all[accId]) return;
+  dates.forEach(d => {
+    const b = all[accId][d];
+    if (!b) return;
+    if (expectFile !== undefined && b.file !== expectFile) return;
+    delete all[accId][d];
+  });
+  if (!Object.keys(all[accId]).length) delete all[accId];
+  t1SaveTxns(all);
 }
 
 /* ============ 台账导入 ============ */
@@ -365,18 +438,23 @@ S['t1'] = () => {
   const missN = ents.reduce((s, e) => s + e.miss, 0);
   const onN = T1_ACC.filter(a => a.on).length;
 
+  const fmtRate = r => r === null ? '<span class="mut">—</span>'
+    : `<span class="${r >= 0 ? 'grn' : 'red'}">${r >= 0 ? '+' : ''}${r.toFixed(2)}%</span>`;
+  const fmtWarn = (r, warn) => r === null ? '<span class="mut" title="上一日合计不为正数或没有更早记录，算不出变动率">—</span>'
+    : (warn ? pill('预警', 'cr') : pill('正常', 'ok'));
   const rows = ents.map(e => [
     `<b>${H(e.ent)}</b>`,
     `<span class="mono">${e.n}</span>${e.miss ? `<span class="red"> +${e.miss} 缺</span>` : ''}`,
-    money(e.bal),
+    `<span class="lnk" data-t1ent="${H(e.ent)}" title="点击查看该主体的账户与流水明细">${money(e.bal)}</span>`,
     e.delta === null ? '<span class="mut">—</span>'
       : `<span class="${e.delta >= 0 ? 'grn' : 'red'}">${e.delta >= 0 ? '+' : ''}${money(e.delta)}</span>`,
-    e.fixed ? money(e.fixed) : '<span class="mut">未设</span>',
-    e.incomplete ? '<span class="mut" title="有账户未录入，余额不全">数据不全</span>'
-      : e.cover === null ? '<span class="mut">—</span>'
-      : `<b class="${e.red ? 'red' : ''}">${e.cover.toFixed(2)}</b>`,
+    fmtRate(e.rate),
+    fmtWarn(e.rate, e.rateWarn),
     e.stale ? pill(`${e.stale} 户沿用昨日`, 'wa') : (e.miss ? pill(`${e.miss} 户无数`, 'cr') : pill('今日已更新', 'ok')),
   ]);
+  const rateRed = ents.filter(e => e.rateWarn);
+  const totRate = (prevD && totPrev > 0.005) ? (tot - totPrev) / totPrev * 100 : null;
+  const totWarn = totRate !== null && Math.abs(totRate) >= (T1_CFG.rateTh || 10);
 
   return head('T1　资金日报生成器',
     '账户台账预置，每天只填<b>变动的</b>。汇总、覆盖倍数、红线、日报文本自动出。<b>登网银抄余额这步省不掉</b>——工具省的是抄完之后的活。',
@@ -392,21 +470,127 @@ S['t1'] = () => {
       { k: '在管账户', v: String(onN), u: '个' },
       { k: '今日已更新', v: String(onN - staleN - missN), u: '个', t: 'g' },
       { k: '沿用昨日', v: String(staleN), u: '个', t: staleN ? 'w' : 'g' },
+      { k: '变动率预警', v: String(rateRed.length), u: '户', t: rateRed.length ? 'c' : 'g' },
       { k: '红线预警', v: String(red.length), u: '户', t: red.length ? 'c' : 'g' },
     ])
     + (missN ? `<div class="note c"><b>${missN} 个账户从未录过余额</b>，没有计入合计。这些账户所属主体<b>不计算覆盖倍数、也不报红线</b>——余额不全时算出来的倍数偏低，会把「没抄数」误报成「快没钱了」。</div>` : '')
     + (staleN ? `<div class="note w"><b>${staleN} 个账户今天没更新，用的是上一次的余额。</b>日报里会单独列出来——沿用昨日的数和今天实抄的数不是一回事，收款人看到才好判断。</div>` : '')
+    + (rateRed.length ? `<div class="note c"><b>变动率预警 ${rateRed.length} 户：</b>${rateRed.map(e => `${H(e.ent)}（${e.rate >= 0 ? '+' : ''}${e.rate.toFixed(2)}%）`).join('、')}。较上日变动超过 ±${T1_CFG.rateTh}%，点余额可下钻到账户与流水明细核对。</div>` : '')
     + (red.length ? `<div class="note c"><b>红线预警 ${red.length} 户：</b>${red.map(e => `${H(e.ent)}（覆盖倍数 ${e.cover.toFixed(2)}）`).join('、')}。低于阈值 ${T1_CFG.ratio} 倍，已在日报中标出。</div>` : '')
-    + card('分主体资金分布', table(
+    + card('分主体资金分布（点余额看账户与流水明细）', table(
       [{ t: '主体' }, { t: '账户数' }, { t: '余额（元）', n: 1 }, { t: '较上日（元）', n: 1 },
-       { t: '月固定支出（元）', n: 1 }, { t: '覆盖倍数', n: 1 }, { t: '更新状态' }], rows,
+       { t: '较上日变动率', n: 1 }, { t: '预警' }, { t: '更新状态' }], rows,
       ['<b>合计</b>', `<b>${onN - missN}</b>`, `<b>${money(tot)}</b>`,
-       delta === null ? '—' : `<b>${delta >= 0 ? '+' : ''}${money(delta)}</b>`, '', '', '']))
-    + cardp('红线规则', `<div class="cols c2">
+       delta === null ? '—' : `<b>${delta >= 0 ? '+' : ''}${money(delta)}</b>`,
+       totRate === null ? '—' : `<b class="${totRate >= 0 ? 'grn' : 'red'}">${totRate >= 0 ? '+' : ''}${totRate.toFixed(2)}%</b>`,
+       totRate === null ? '' : (totWarn ? pill('预警', 'cr') : pill('正常', 'ok')), '']))
+    + cardp('预警与红线规则', `<div class="cols c2">
+        <div class="field"><label class="fl">变动率预警阈值（较上日 ±%）</label>
+          <input type="number" step="1" min="1" id="t1rateTh" value="${T1_CFG.rateTh}"></div>
+        <div class="note" style="margin:0"><b>默认 ±10%</b>——主体余额较上一日变动幅度超过它，分布表「预警」列标红；上一日合计为 0 时算不出变动率，不报警。</div>
         <div class="field"><label class="fl">覆盖倍数阈值（余额 ÷ 月固定支出）</label>
           <input type="number" step="0.1" id="t1ratio" value="${T1_CFG.ratio}"></div>
-        <div class="note" style="margin:0"><b>建议值 1.5 倍</b>——单主体活期余额低于当月固定支出的 1.5 倍时预警。这是方案第十二章待老板拍板的第 4 项，改了这里等于改了口径。</div>
+        <div class="note" style="margin:0"><b>建议值 1.5 倍</b>——单主体活期余额低于当月固定支出的 1.5 倍时预警。这是方案第十二章待老板拍板的第 4 项，改了这里等于改了口径。月固定支出在「账户台账」里维护。</div>
       </div>`);
+};
+
+/* 主体明细（下钻第一层）：这个主体的余额由哪些账户组成、每个数取自哪天、谁写进来的 */
+S['t1-ent'] = () => {
+  const ent = T1.drillEnt;
+  const e = ent ? t1ByEnt(T1.date).find(x => x.ent === ent) : null;
+  if (!e) return S['t1']();   // 没有下钻目标（比如直接刷新进来）就回日报
+  const prevD = t1Prev(T1.date);
+  const prevEff = prevD ? t1Effective(prevD) : null;
+  const txns = t1LoadTxns();
+  const srcLabel = s => s === 'T2' ? '来自 T2 流水' : s === 'T1导入' ? '来自台账导入' : '来自 ' + s;
+
+  const rows = e.accs.map(a => {
+    const pv = prevEff && prevEff[a.id] && prevEff[a.id].v !== null ? prevEff[a.id].v : null;
+    const d = (a.v !== null && pv !== null) ? a.v - pv : null;
+    const src = a.from ? t1BalFrom(a.from, a.id) : '';
+    const mine = txns[a.id] || {};
+    const days = Object.keys(mine).length;
+    const cnt = Object.values(mine).reduce((s, b) => s + b.rows.length, 0);
+    return [
+      `${a.type === 'plat' ? '▣' : '▤'} ${H(a.name)}`
+        + (a.no ? `<div class="mut" style="font-size:11px">${H(a.no)}</div>` : ''),
+      a.v === null ? '<span class="red">从未录入</span>' : money(a.v),
+      d === null ? '<span class="mut">—</span>'
+        : `<span class="${d >= 0 ? 'grn' : 'red'}">${d >= 0 ? '+' : ''}${money(d)}</span>`,
+      a.v === null ? '<span class="mut">—</span>'
+        : a.stale ? `<span class="mut">${H(a.from)}</span> ${pill('沿用', 'wa')}` : pill('今日', 'ok'),
+      src ? pill(srcLabel(src), 'ok') : (a.v === null ? '<span class="mut">—</span>' : '<span class="mut">手工录入</span>'),
+      cnt ? `<span class="lnk" data-t1txn="${a.id}">流水 ${cnt} 笔 / ${days} 天</span>` : '<span class="mut">无流水明细</span>',
+    ];
+  });
+
+  // 论证：这条变动率是怎么算出来的、为什么报/不报警——结论要能自证
+  const exp = e.rate === null
+    ? `<div class="note"><b>较上日变动率算不出来：</b>${prevD ? `上一日（${H(prevD)}）该主体合计不是正数，分母不成立` : '没有更早的余额记录'}，所以不报预警。</div>`
+    : `<div class="note ${e.rateWarn ? 'c' : 'g'}"><b>较上日变动率 ${e.rate >= 0 ? '+' : ''}${e.rate.toFixed(2)}% → ${e.rateWarn ? '预警' : '正常'}。</b>
+       算法：（今日合计 ${money(e.bal)} − 上一日 ${H(prevD)} 合计 ${money(e.prev)}）÷ ${money(e.prev)}；预警阈值 ±${T1_CFG.rateTh}%。</div>`;
+
+  return head(`${ent} · 资金明细`, `${T1.date} 各账户余额与来源。<b>点「流水 N 笔」看导入的每一笔</b>；没有流水的账户，余额是手工录或台账导的。`, '工具箱 · T1',
+    `<input type="date" id="t1date" value="${T1.date}">
+     <button class="btn" data-t1go="daily">← 返回日报</button>
+     <button class="btn" data-t1go="entry">录入余额</button>`)
+    + kpis([
+      { k: '余额合计', v: money(e.bal), u: '元' },
+      { k: '较上一日', v: e.delta === null ? '—' : (e.delta >= 0 ? '+' : '') + money(e.delta), u: e.delta === null ? '' : '元', t: e.delta === null ? '' : (e.delta >= 0 ? 'g' : 'c') },
+      { k: '较上日变动率', v: e.rate === null ? '—' : (e.rate >= 0 ? '+' : '') + e.rate.toFixed(2) + '%', t: e.rate === null ? '' : (e.rateWarn ? 'c' : 'g') },
+      { k: '账户', v: `${e.n}<small> / ${e.n + e.miss}</small>`, d: e.miss ? `${e.miss} 户从未录入` : '全部有数' },
+    ])
+    + exp
+    + (e.miss ? `<div class="note w"><b>${e.miss} 个账户从未录入余额</b>，上面的合计与变动率只含已录入的 ${e.n} 户。</div>` : '')
+    + card('账户构成', table(
+      [{ t: '账户 / 平台' }, { t: '余额（元）', n: 1 }, { t: '较上日（元）', n: 1 },
+       { t: '数据取自' }, { t: '余额来源' }, { t: '流水明细' }], rows,
+      ['<b>合计</b>', `<b>${money(e.bal)}</b>`,
+       e.delta === null ? '—' : `<b>${e.delta >= 0 ? '+' : ''}${money(e.delta)}</b>`, '', '', '']));
+};
+
+/* 流水明细（下钻第二层）：T2 导入时留存的原始流水，按天分块 */
+S['t1-txn'] = () => {
+  const a = t1AccById(T1.drillAcc);
+  if (!a) return S['t1']();
+  const mine = t1LoadTxns()[a.id] || {};
+  const dates = Object.keys(mine).sort().reverse();
+  const back = `<button class="btn" data-t1go="ent">← 返回 ${H(a.ent)} 明细</button>
+     <button class="btn" data-t1go="daily">返回日报</button>`;
+
+  if (!dates.length) {
+    return head(`${a.ent} · ${a.name} · 流水明细`, '这个账户还没有留存的流水。', '工具箱 · T1', back)
+      + `<div class="soonbox"><div class="si">▷</div><h3>暂无流水明细</h3>
+         <p>它的余额来自手工录入或台账导入。用 <b>T2 银行流水转凭证</b>处理一次这个账户的网银流水后，每一笔都会留存在这里。</p></div>`;
+  }
+
+  const blocks = dates.map(d => {
+    const b = mine[d];
+    let inS = 0, outS = 0;
+    const rows = b.rows.map(r => {
+      if (r.dir === 'in') inS += r.amt; else outS += r.amt;
+      return [
+        H(r.memo || '—'),
+        r.opp ? H(r.opp) : '<span class="mut">—</span>',
+        r.dir === 'in' ? `<span class="grn">+${money(r.amt)}</span>` : '<span class="mut">—</span>',
+        r.dir === 'out' ? `<span class="red">−${money(r.amt)}</span>` : '<span class="mut">—</span>',
+        (r.bal === null || r.bal === undefined) ? '<span class="mut">—</span>' : money(r.bal),
+        r.ref ? `<span class="code">${H(r.ref)}</span>` : '<span class="mut">—</span>',
+      ];
+    });
+    const cut = b.total && b.total > b.rows.length;
+    return card(`${d} · ${b.rows.length} 笔${cut ? `（原 ${b.total} 笔，超上限已截断，当日合计只含留存部分）` : ''} · 来自「${b.file || '导入'}」`, table(
+      [{ t: '摘要' }, { t: '对方户名' }, { t: '收入（元）', n: 1 }, { t: '支出（元）', n: 1 },
+       { t: '当时余额（元）', n: 1 }, { t: '流水号' }], rows,
+      ['<b>当日合计</b>', '',
+       `<b class="grn">+${money(inS)}</b>`, `<b class="red">−${money(outS)}</b>`,
+       `<b>净 ${inS - outS >= 0 ? '+' : ''}${money(inS - outS)}</b>`, '']));
+  }).join('');
+
+  return head(`${a.ent} · ${a.name} · 流水明细`,
+    `T2 转换流水时自动留存，共 <b>${dates.length}</b> 天。同一天重复导入会整天替换，不会重复累计；最多留最近 62 天。`,
+    '工具箱 · T1', back)
+    + blocks;
 };
 
 /* 录入 */
@@ -614,6 +798,10 @@ function t1Export() {
 document.addEventListener('click', e => {
   const g = e.target.closest('[data-t1go]');
   if (g) { const v = g.dataset.t1go; go(v === 'daily' ? 't1' : 't1-' + v); return; }
+  const de = e.target.closest('[data-t1ent]');
+  if (de) { T1.drillEnt = de.dataset.t1ent; go('t1-ent'); return; }
+  const dtx = e.target.closest('[data-t1txn]');
+  if (dtx) { T1.drillAcc = dtx.dataset.t1txn; go('t1-txn'); return; }
   const d = e.target.closest('[data-t1del]');
   if (d) {
     if (!confirm('确认删除该账户？历史余额数据会保留。')) return;
@@ -657,7 +845,8 @@ document.addEventListener('click', e => {
     t1ImpApply();
   }
   else if (act === 'addAcc') {
-    const id = 'A' + String(T1_ACC.length + 1).padStart(3, '0');
+    // 不能用 length+1：删过账户会撞号，撞上的新账户会继承旧账户的历史余额和流水明细
+    const id = t1MkId(t1NextSeq());
     T1_ACC.push({ id, ent: '新主体', name: '新账户', type: 'bank', on: 1 });
     t1SaveAcc(T1_ACC); go('t1-acc');
   }
@@ -689,7 +878,9 @@ document.addEventListener('change', e => {
     if (e.target.value === '') delete T1.imp.map[k]; else T1.imp.map[k] = +e.target.value;
     go('t1-imp'); return;
   }
-  if (e.target.id === 't1date') { T1.date = e.target.value; go(location.hash ? 't1' : 't1'); }
+  // 改日期留在当前页——在主体明细里翻日期不该被踢回日报
+  if (e.target.id === 't1date') { T1.date = e.target.value; go(typeof CURS === 'string' && CURS.indexOf('t1') === 0 ? CURS : 't1'); }
   if (e.target.id === 't1entFilter') { T1.filterEnt = e.target.value; go('t1-entry'); }
   if (e.target.id === 't1ratio') { T1_CFG.ratio = Number(e.target.value) || 1.5; t1SaveCfg(T1_CFG); go('t1'); }
+  if (e.target.id === 't1rateTh') { T1_CFG.rateTh = Math.abs(Number(e.target.value)) || 10; t1SaveCfg(T1_CFG); go('t1'); }
 });

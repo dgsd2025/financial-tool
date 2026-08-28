@@ -103,8 +103,6 @@ function t1ByEnt(date) {
   return Object.values(m).sort((a, b) => b.bal - a.bal);
 }
 
-const wan = n => (n / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
 /* ============ 给 T2 用的接口 ============ */
 /* 账户主数据只有 T1 这一份，T2 不自己存账户，只通过下面两个函数引用。
    放在这里是为了让「谁在用 T1 的账户」一眼可见——改这两个函数前先看 T2 的调用点。 */
@@ -370,10 +368,10 @@ S['t1'] = () => {
   const rows = ents.map(e => [
     `<b>${H(e.ent)}</b>`,
     `<span class="mono">${e.n}</span>${e.miss ? `<span class="red"> +${e.miss} 缺</span>` : ''}`,
-    wan(e.bal),
+    money(e.bal),
     e.delta === null ? '<span class="mut">—</span>'
-      : `<span class="${e.delta >= 0 ? 'grn' : 'red'}">${e.delta >= 0 ? '+' : ''}${wan(e.delta)}</span>`,
-    e.fixed ? wan(e.fixed) : '<span class="mut">未设</span>',
+      : `<span class="${e.delta >= 0 ? 'grn' : 'red'}">${e.delta >= 0 ? '+' : ''}${money(e.delta)}</span>`,
+    e.fixed ? money(e.fixed) : '<span class="mut">未设</span>',
     e.incomplete ? '<span class="mut" title="有账户未录入，余额不全">数据不全</span>'
       : e.cover === null ? '<span class="mut">—</span>'
       : `<b class="${e.red ? 'red' : ''}">${e.cover.toFixed(2)}</b>`,
@@ -389,8 +387,8 @@ S['t1'] = () => {
      <button class="btn" data-t1go="entry">录入余额</button>
      <button class="btn pri" data-t1act="gen">生成日报</button>`)
     + kpis([
-      { k: '账户总余额', v: wan(tot), u: '万' },
-      { k: '较上一日', v: delta === null ? '—' : (delta >= 0 ? '+' : '') + wan(delta), u: delta === null ? '' : '万', t: delta === null ? '' : (delta >= 0 ? 'g' : 'c') },
+      { k: '账户总余额', v: money(tot), u: '元' },
+      { k: '较上一日', v: delta === null ? '—' : (delta >= 0 ? '+' : '') + money(delta), u: delta === null ? '' : '元', t: delta === null ? '' : (delta >= 0 ? 'g' : 'c') },
       { k: '在管账户', v: String(onN), u: '个' },
       { k: '今日已更新', v: String(onN - staleN - missN), u: '个', t: 'g' },
       { k: '沿用昨日', v: String(staleN), u: '个', t: staleN ? 'w' : 'g' },
@@ -400,10 +398,10 @@ S['t1'] = () => {
     + (staleN ? `<div class="note w"><b>${staleN} 个账户今天没更新，用的是上一次的余额。</b>日报里会单独列出来——沿用昨日的数和今天实抄的数不是一回事，收款人看到才好判断。</div>` : '')
     + (red.length ? `<div class="note c"><b>红线预警 ${red.length} 户：</b>${red.map(e => `${H(e.ent)}（覆盖倍数 ${e.cover.toFixed(2)}）`).join('、')}。低于阈值 ${T1_CFG.ratio} 倍，已在日报中标出。</div>` : '')
     + card('分主体资金分布', table(
-      [{ t: '主体' }, { t: '账户数' }, { t: '余额（万）', n: 1 }, { t: '较上日（万）', n: 1 },
-       { t: '月固定支出（万）', n: 1 }, { t: '覆盖倍数', n: 1 }, { t: '更新状态' }], rows,
-      ['<b>合计</b>', `<b>${onN - missN}</b>`, `<b>${wan(tot)}</b>`,
-       delta === null ? '—' : `<b>${delta >= 0 ? '+' : ''}${wan(delta)}</b>`, '', '', '']))
+      [{ t: '主体' }, { t: '账户数' }, { t: '余额（元）', n: 1 }, { t: '较上日（元）', n: 1 },
+       { t: '月固定支出（元）', n: 1 }, { t: '覆盖倍数', n: 1 }, { t: '更新状态' }], rows,
+      ['<b>合计</b>', `<b>${onN - missN}</b>`, `<b>${money(tot)}</b>`,
+       delta === null ? '—' : `<b>${delta >= 0 ? '+' : ''}${money(delta)}</b>`, '', '', '']))
     + cardp('红线规则', `<div class="cols c2">
         <div class="field"><label class="fl">覆盖倍数阈值（余额 ÷ 月固定支出）</label>
           <input type="number" step="0.1" id="t1ratio" value="${T1_CFG.ratio}"></div>
@@ -462,7 +460,6 @@ S['t1-acc'] = () => {
   const fixRows = ents.map(e => [
     H(e),
     `<input type="number" step="1000" class="t1in wide" data-t1fix="${H(e)}" value="${T1_CFG.fixed[e] || 0}">`,
-    `<span class="mut">${wan(T1_CFG.fixed[e] || 0)} 万</span>`,
   ]);
   return head('账户台账', `在管 <b>${T1_ACC.filter(a => a.on).length}</b> / 共 ${T1_ACC.length} 个。改完点保存。`, '工具箱 · T1',
     `<button class="btn" data-t1go="daily">← 返回</button>
@@ -474,7 +471,7 @@ S['t1-acc'] = () => {
     + card('账户', table(
       [{ t: '编号' }, { t: '主体' }, { t: '账户 / 平台' }, { t: '账号' }, { t: '类型' }, { t: '状态' }, { t: '' }], rows))
     + card('各主体月固定支出（算覆盖倍数用）', table(
-      [{ t: '主体' }, { t: '月固定支出（元）', n: 1 }, { t: '折合' }], fixRows));
+      [{ t: '主体' }, { t: '月固定支出（元）', n: 1 }], fixRows));
 };
 
 /* 导入台账 */
@@ -559,13 +556,13 @@ function t1Text() {
 
   let t = `【资金日报】${T1.date}\n`;
   t += `━━━━━━━━━━━━━━\n`;
-  t += `集团合计　${wan(tot)} 万`;
-  if (delta !== null) t += `　较上日 ${delta >= 0 ? '+' : ''}${wan(delta)} 万`;
+  t += `集团合计　${money(tot)} 元`;
+  if (delta !== null) t += `　较上日 ${delta >= 0 ? '+' : ''}${money(delta)} 元`;
   t += `\n在管账户 ${T1_ACC.filter(a => a.on).length} 个\n\n`;
 
   ents.forEach(e => {
-    t += `▍${e.ent}　${wan(e.bal)} 万`;
-    if (e.delta !== null && Math.abs(e.delta) > 0.005) t += `　${e.delta >= 0 ? '↑' : '↓'}${wan(Math.abs(e.delta))}`;
+    t += `▍${e.ent}　${money(e.bal)} 元`;
+    if (e.delta !== null && Math.abs(e.delta) > 0.005) t += `　${e.delta >= 0 ? '↑' : '↓'}${money(Math.abs(e.delta))}`;
     if (e.incomplete) t += `　覆盖 —（数据不全）`;
     else if (e.cover !== null) t += `　覆盖 ${e.cover.toFixed(2)}${e.red ? ' ⚠' : ''}`;
     t += `\n`;
@@ -573,7 +570,7 @@ function t1Text() {
 
   if (red.length) {
     t += `\n⚠ 红线预警（低于 ${T1_CFG.ratio} 倍）\n`;
-    red.forEach(e => { t += `　${e.ent}　覆盖 ${e.cover.toFixed(2)}　余额 ${wan(e.bal)} 万 / 月固定支出 ${wan(e.fixed)} 万\n`; });
+    red.forEach(e => { t += `　${e.ent}　覆盖 ${e.cover.toFixed(2)}　余额 ${money(e.bal)} 元 / 月固定支出 ${money(e.fixed)} 元\n`; });
   }
   if (stale.length) {
     t += `\n※ 以下 ${stale.length} 个账户今日未更新，沿用上次余额：\n　${stale.join('、')}\n`;

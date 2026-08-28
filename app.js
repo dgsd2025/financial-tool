@@ -29,12 +29,14 @@ const cardp = (t, b, tools) => `<div class="card"><div class="ch"><h3>${H(t)}</h
 const head = (t, sub, code, tools) => `<div class="phead"><div><h2>${H(t)}</h2><div class="sub2">${sub}</div></div>
   <div class="mid">${code ? `<span class="mcode">${H(code)}</span>` : ''}${tools || ''}</div></div>`;
 
-function download(filename, content) {
-  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' });
+function downloadBlob(filename, blob) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = filename;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+function download(filename, content) {
+  downloadBlob(filename, new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8' }));
 }
 const csvCell = v => {
   const s = String(v == null ? '' : v);
@@ -449,8 +451,34 @@ function runRules() {
   saveRules(T2.entId, RULES);
 }
 
-/* 生成凭证行 */
-function vouchers() {
+/* 导出留痕：两个导出口径共用一份处理记录 */
+function t2LogExport() {
+  const { ok, ex, total } = T2.result;
+  addLog({
+    time: new Date().toLocaleString('zh-CN'), file: T2.file.name, ent: T2.ent,
+    total, ok: ok.length, ex: ex.length,
+    rate: total ? Math.round(ok.length / total * 100) : 0, exported: 1
+  });
+}
+
+/* ============ 凭证生成 ============ */
+/* 科目代码里的项目后缀（5001_1001）是本工具内部写法。
+   金蝶模版要求拆开：科目代码只写主科目 5001，项目编码 1001 单独填「项目」列。 */
+function splitAcct(code) {
+  const m = /^(\d+)_(\d+)$/.exec(String(code));
+  return m ? { base: m[1], proj: m[2] } : { base: String(code).split('_')[0], proj: '' };
+}
+
+/* 金蝶里除项目外还带「供应商 / 客户 / 职员」核算的科目：
+   本工具只认得出项目，这几个科目导入前要人工补一列。
+   取自模版「科目数据」页的核算类别（优栖 2026 年账套）。 */
+const AUX_EXTRA = {
+  '224101': '供应商', '122101': '客户', '2203': '客户', '122102': '职员',
+};
+
+/* 凭证行的中间形态：一行一分录。凭证明细 CSV 与金蝶模版都从它派生，
+   借贷拆分逻辑只写一遍（§4.24 单一真相源）。 */
+function voucherLines() {
   const { ok } = T2.result;
   const out = [];
   const bankAcct = () => {
@@ -458,14 +486,22 @@ function vouchers() {
     return hit || ['100203', '银行存款_优栖工行6418'];
   };
   ok.forEach((r, i) => {
-    const no = String(i + 1).padStart(4, '0');
+    const no = i + 1;
     const bank = bankAcct();
     const other = [r.acct, acctName(r.acct)];
-    const push = (a, d, c) => out.push([
-      r.date, T2.vchWord, no, r.vmemo, a[0], a[1],
-      d ? d.toFixed(2) : '', c ? c.toFixed(2) : '',
-      T2.ent, T2.line, r.proj ? r.proj.name : '', '', r.opp, r.ref, T2.acctNo,
-    ]);
+    let seq = 0;
+    const push = (a, d, c) => {
+      const sp = splitAcct(a[0]);
+      out.push({
+        date: r.date, word: T2.vchWord, no, seq: ++seq, memo: r.vmemo,
+        acctFull: a[0], acct: sp.base, acctName: a[1],
+        dr: d ? +d.toFixed(2) : 0, cr: c ? +c.toFixed(2) : 0,
+        proj: sp.proj,
+        projName: sp.proj ? ((PROJECTS().find(p => p.code === sp.proj) || {}).name || '') : '',
+        auxNeed: AUX_EXTRA[sp.base] || '',
+        opp: r.opp, ref: r.ref,
+      });
+    };
     if (r.dir === 'in' && r.tax) {
       // 含税收入：拆主营业务收入 + 销项税额（按征收率）
       const net = +(r.amt / (1 + r.tax)).toFixed(2);
@@ -484,6 +520,38 @@ function vouchers() {
     }
   });
   return out;
+}
+
+/* 凭证明细（本工具口径，带主体/业务线/对方户名/流水号，用于追溯与留痕） */
+function vouchers() {
+  return voucherLines().map(l => [
+    l.date, l.word, String(l.no).padStart(4, '0'), l.memo, l.acctFull, l.acctName,
+    l.dr ? l.dr.toFixed(2) : '', l.cr ? l.cr.toFixed(2) : '',
+    T2.ent, T2.line, l.projName, '', l.opp, l.ref, T2.acctNo,
+  ]);
+}
+
+/* 金蝶凭证导入模版 —— 25 列，列名与顺序一个字都不能改，
+   照抄用户提供的「凭证导入成功_2026-08.xlsx · 凭证模版」页。 */
+const KD_HEADER = ['日期', '凭证字', '凭证号', '附件数', '分录序号', '摘要', '科目代码', '科目名称',
+  '借方金额', '贷方金额', '客户', '供应商', '职员', '项目', '部门', '存货',
+  '自定义辅助核算类别', '自定义辅助核算编码', '自定义辅助核算类别1', '自定义辅助核算编码1',
+  '数量', '单价', '原币金额', '币别', '汇率'];
+
+function kingdeeRows() {
+  const E = '';
+  return voucherLines().map(l => {
+    const amt = l.dr || l.cr;   // 原币金额取本行发生额；红冲行为负数
+    return [
+      { d: l.date }, l.word, l.no, 0, l.seq, l.memo,
+      { s: l.acct }, l.acctName,
+      l.dr ? { n: l.dr } : E, l.cr ? { n: l.cr } : E,
+      E, E, E,                                  // 客户 / 供应商 / 职员
+      l.proj ? { s: l.proj } : E,               // 项目：填编码，不填名称
+      E, E, E, E, E, E, E, E,                   // 部门/存货/自定义辅助核算×2/数量/单价
+      { n: amt }, 'RMB', { n: 1 },
+    ];
+  });
 }
 
 /* ============ 界面：工具箱 ============ */
@@ -900,35 +968,50 @@ function t2Step4() {
 }
 
 function t2Step5() {
-  const { ok, ex, total } = T2.result;
-  const v = vouchers();
-  const dr = v.reduce((s, r) => s + (Number(r[6]) || 0), 0);
-  const cr = v.reduce((s, r) => s + (Number(r[7]) || 0), 0);
+  const { ok, ex } = T2.result;
+  const L = voucherLines();
+  const dr = L.reduce((s, l) => s + l.dr, 0);
+  const cr = L.reduce((s, l) => s + l.cr, 0);
   const bal = Math.abs(dr - cr) < 0.005;
+  // 科目代码没拆干净（项目没填上）的行，导进金蝶必报错，先拦下来
+  const badAcct = L.filter(l => /_/.test(l.acctFull) && !l.proj);
+  // 金蝶里还要供应商/客户/职员的科目，本工具填不出，导入前要人工补一列
+  const auxRows = L.filter(l => l.auxNeed);
+  const auxKinds = [...new Set(auxRows.map(l => l.acct + ' ' + l.acctName + '（缺' + l.auxNeed + '）'))];
+  const ready = bal && !badAcct.length;
   return kpis([
     { k: '生成凭证', v: String(ok.length), u: '张' },
-    { k: '凭证行数', v: String(v.length), u: '行' },
+    { k: '凭证行数', v: String(L.length), u: '行' },
     { k: '借方合计', v: money(dr) },
     { k: '贷方合计', v: money(cr) },
     { k: '借贷平衡', v: bal ? '✓' : '✗', t: bal ? 'g' : 'c' },
     { k: '未处理例外', v: String(ex.length), u: '笔', t: ex.length ? 'w' : 'g' },
   ])
-    + (bal ? `<div class="note g"><b>借贷平衡，可以导出。</b>导入账务系统后请复核科目与维度，确认无误再过账。</div>`
+    + (bal ? `<div class="note g"><b>借贷平衡，可以导出。</b>导入金蝶后请复核科目与项目，确认无误再过账。</div>`
       : `<div class="note c"><b>借贷不平衡，请勿导入。</b>请返回检查金额列是否对应正确。</div>`)
+    + (badAcct.length ? `<div class="note c"><b>有 ${badAcct.length} 行科目缺项目编码</b>（${H(badAcct.slice(0, 3).map(l => l.acctFull).join('、'))}），
+        金蝶会拒收。请返回例外处理，给这些笔指定项目。</div>` : '')
+    + (auxRows.length ? `<div class="note w"><b>${auxRows.length} 行还要人工补辅助核算：</b>${H(auxKinds.join('；'))}。
+        本工具只认得出项目，客户/供应商/职员这几列留空，导入前请在 Excel 里补上编码。</div>` : '')
     + `<div class="cols c2">
-      ${cardp('凭证导入文件', `<div style="font-size:12.5px;line-height:1.8">
-        ${ok.length} 张凭证 / ${v.length} 行<br>
-        <span class="mut">列：日期·凭证字·凭证号·摘要·科目编码·科目名称·借方·贷方·主体·业务线·项目·合同号·对方户名·流水号·账号</span></div>
-        <button class="btn pri" style="margin-top:11px" data-act="dlVoucher" ${bal ? '' : 'disabled'}>下载凭证 CSV</button>`)}
+      ${cardp('金蝶凭证导入文件', `<div style="font-size:12.5px;line-height:1.8">
+        ${ok.length} 张凭证 / ${L.length} 行 · <b>.xlsx</b><br>
+        <span class="mut">25 列金蝶模版：日期·凭证字·凭证号·附件数·分录序号·摘要·科目代码·科目名称·借贷方金额·客户·供应商·职员·项目·部门·存货·自定义辅助核算×2·数量·单价·原币金额·币别·汇率</span><br>
+        <span class="mut">科目代码只写主科目，项目按<b>编码</b>填「项目」列（如 1001 花都UU公寓）</span></div>
+        <button class="btn pri" style="margin-top:11px" data-act="dlKingdee" ${ready ? '' : 'disabled'}>下载金蝶凭证 xlsx</button>
+        <button class="btn" style="margin-top:11px" data-act="dlVoucher" ${bal ? '' : 'disabled'}>凭证明细 CSV（留痕用）</button>`)}
       ${cardp('例外清单', ex.length ? `<div style="font-size:12.5px;line-height:1.8">
         ${ex.length} 笔未能自动匹配<br><span class="mut">这些笔不在凭证文件里，需人工在账务系统单独处理</span></div>
         <button class="btn" style="margin-top:11px" data-act="dlEx">下载例外清单 CSV</button>`
       : `<div style="font-size:12.5px;color:var(--good)">没有例外，全部已匹配。</div>`)}
     </div>`
-    + card('凭证预览（前 30 行）', table(
-      [{ t: '日期' }, { t: '凭证字号' }, { t: '摘要' }, { t: '科目' }, { t: '借方', n: 1 }, { t: '贷方', n: 1 }, { t: '主体' }],
-      v.slice(0, 30).map(r => [r[0], r[1] + '-' + r[2], H(r[3]), `<span class="code">${r[4]}</span> ${H(r[5])}`,
-        r[6] ? money(r[6]) : '', r[7] ? money(r[7]) : '', H(r[8])])));
+    + card('凭证预览（前 30 行 · 与导出文件同口径）', table(
+      [{ t: '日期' }, { t: '凭证字号' }, { t: '分录' }, { t: '摘要' }, { t: '科目代码' }, { t: '科目名称' },
+       { t: '借方', n: 1 }, { t: '贷方', n: 1 }, { t: '项目' }],
+      L.slice(0, 30).map(l => [l.date, l.word + '-' + l.no, l.seq, H(l.memo),
+        `<span class="code">${H(l.acct)}</span>`, H(l.acctName),
+        l.dr ? money(l.dr) : '', l.cr ? money(l.cr) : '',
+        l.proj ? `<span class="code">${H(l.proj)}</span> ${H(l.projName)}` : ''])));
 }
 
 /* ============ 二期占位 ============ */
@@ -1122,7 +1205,17 @@ document.addEventListener('click', e => {
       const sel = document.querySelector(`[data-fix="${i}"]`);
       const save = document.querySelector(`[data-save="${i}"]`);
       if (sel && sel.value) {
-        r.acct = sel.value; r.vmemo = r.memo || acctName(sel.value); r.warn = '';
+        // 下拉里选的是科目模版（如 5001_{p}），要把项目编码填进去才是真科目代码。
+        // 项目认不出来就仍留在例外，不硬填一个假编码——那样导金蝶必报错。
+        const pj = r.proj || detectProj(r.memo) || detectProj(r.opp)
+          || PROJECTS().find(p => p.code === T2.defProj);
+        if (String(sel.value).includes('{p}') && !pj) {
+          r.why = '指定的科目要带项目，但摘要与户名里都认不出是哪个项目';
+          still.push(r); return;
+        }
+        r.proj = pj;
+        r.acct = fillAcct(sel.value, pj);
+        r.vmemo = r.memo || acctName(r.acct); r.warn = '';
         T2.result.ok.push(r); fixed++;
         // 存为规则：可按摘要，也可按对方户名。
         // 银行流水里「跨行汇款」「网转」这类摘要是交易类型、不含业务含义，
@@ -1159,16 +1252,19 @@ document.addEventListener('click', e => {
     } else toast('没能写进台账');
   }
   else if (act === 't2export') { T2.step = 5; go('t2'); }
+  else if (act === 'dlKingdee') {
+    // 金蝶模版必须是 xlsx：日期要真日期、科目代码要文本，CSV 传上去金蝶不认
+    const rows = [KD_HEADER].concat(kingdeeRows());
+    const period = (T2.result.ok[0] || {}).date ? T2.result.ok[0].date.slice(0, 7) : new Date().toISOString().slice(0, 7);
+    downloadBlob(`凭证导入_${T2.ent}_${period}.xlsx`, XLSXWrite.build([{ name: '凭证模版', rows }]));
+    t2LogExport();
+    toast('金蝶凭证 xlsx 已下载，处理记录已留痕');
+  }
   else if (act === 'dlVoucher') {
     const hdr = ['日期', '凭证字', '凭证号', '摘要', '科目编码', '科目名称', '借方金额', '贷方金额', '主体', '业务线', '项目', '合同号', '对方户名', '流水号', '账号'];
-    download(`凭证导入_${T2.ent}_${new Date().toISOString().slice(0, 10)}.csv`, toCSV([hdr].concat(vouchers())));
-    const { ok, ex, total } = T2.result;
-    addLog({
-      time: new Date().toLocaleString('zh-CN'), file: T2.file.name, ent: T2.ent,
-      total, ok: ok.length, ex: ex.length,
-      rate: total ? Math.round(ok.length / total * 100) : 0, exported: 1
-    });
-    toast('凭证文件已下载，处理记录已留痕');
+    download(`凭证明细_${T2.ent}_${new Date().toISOString().slice(0, 10)}.csv`, toCSV([hdr].concat(vouchers())));
+    t2LogExport();
+    toast('凭证明细 CSV 已下载，处理记录已留痕');
   }
   else if (act === 'dlEx') {
     const hdr = ['行号', '日期', '摘要', '对方户名', '方向', '金额', '未匹配原因'];

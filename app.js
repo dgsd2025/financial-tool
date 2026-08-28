@@ -113,6 +113,12 @@ const RS_YOUQI = {
   },
   ownerAcct: '5402_{p}',
   ownerMemo: '付业主租金',
+  /* 在编员工名单：名单内走 221101 应付职工薪酬（社保个人部分与个税另由月末计提凭证处理），
+     名单外（项目现场、临时人员）走 560209 管理费用_工资。取自真实凭证：董伟森走应付职工薪酬全套。 */
+  staff: ['董伟森'],
+  staffAcct: '221101',
+  /* 默认项目：手续费、服务费这类摘要里没有项目信息，真账都记冼村 */
+  defaultProj: '2001',
   rules: [
     // 顺序要紧：命中第一条即停，越具体的越靠前
     { kw: '复建房|冼村|洗村', dir: 'out', acct: '5402_{p}', memo: '付业主租金' },
@@ -135,8 +141,9 @@ const RS_YOUQI = {
       warn: '这类通常要拆房租与水电两行，请复核' },
     { kw: '水费|电费|水电', dir: 'out', acct: '560204_{p}', memo: '付水电费' },
     { kw: '清洁|保洁|劳务费', dir: 'out', acct: '560206_{p}', memo: '付清洁费' },
-    { kw: '工资|薪酬|薪金', dir: 'out', acct: '560209_{p}', memo: '发放工资',
-      warn: '若为公司在编员工应走 221101 应付职工薪酬，请确认' },
+    { kw: '工资|薪酬|薪金|代发', dir: 'out', acct: '560209_{p}', memo: '发放工资',
+      byStaff: 1,
+      note: '对方户名在在编员工名单里 → 221101 应付职工薪酬；不在 → 560209 管理费用_工资' },
     { kw: '财务.*费用|服务费|代理费', dir: 'out', acct: '560223_{p}', memo: '付服务费' },
     { kw: '手续费|工本费|短信费|账户管理费', dir: 'out', acct: '560303_{p}', memo: '银行手续费' },
   ],
@@ -152,6 +159,8 @@ function useRuleSet(entId) {
   RULES = RS ? loadRules(entId) : [];
   return RS;
 }
+/** 主体自带的默认项目（用户可在步骤 2 改） */
+const defaultProjOf = () => (RS && RS.defaultProj) || '';
 const PROJECTS = () => (RS ? RS.projects : []);
 const ACCOUNTS = () => (RS ? RS.accounts : []);
 
@@ -180,8 +189,17 @@ function ownerProj(opp) {
   return null;
 }
 
+/** 对方户名是否在编员工 */
+function isStaff(opp) {
+  if (!RS || !RS.staff) return false;
+  const s = String(opp || '').trim();
+  return !!s && RS.staff.some(n => s === n || s.includes(n));
+}
+
 /* ============ 规则库（按主体分开存） ============ */
-const RULE_KEY = e => 'fsc_t2_rules_' + e + '_v2';
+/* v3：工资按在编员工名单分流 + 主体默认项目。
+   版本号必须随预置规则变更递增，否则老用户浏览器里缓存的旧规则不会更新。 */
+const RULE_KEY = e => 'fsc_t2_rules_' + e + '_v3';
 const LOG_KEY = 'fsc_t2_log_v1';
 
 function loadRules(entId) {
@@ -322,6 +340,13 @@ function runRules() {
     rec.proj = proj; rec.acct = fillAcct(hit.acct, proj);
     rec.tax = hit.tax || 0; rec.red = hit.red || 0;
     rec.warn = hit.warn || '';
+    // 工资类按在编员工名单分流：名单内冲应付职工薪酬，名单外记管理费用_工资
+    if (hit.byStaff && isStaff(opp)) {
+      rec.acct = fillAcct(RS.staffAcct, proj);
+      rec.vmemo = '发放工资（冲应付职工薪酬）';
+      rec.hitField = hitField + ' + 员工名单';
+      rec.warn = '本行只冲应付职工薪酬（实发数）；社保个人部分与个税代扣由月末计提凭证处理';
+    }
     // 科目需要项目但没识别出来 → 不硬填，进例外让人指定
     if (String(hit.acct).includes('{p}') && !proj) {
       rec.why = '命中规则「' + hit.memo + '」，但摘要里认不出是哪个项目';
@@ -785,7 +810,7 @@ function bindDynamic() {
         T2.entId = el.value;
         const ei = ENTITIES.find(x => x.id === T2.entId);
         T2.ent = ei ? ei.full : '';
-        useRuleSet(T2.entId); T2.defProj = '';
+        useRuleSet(T2.entId); T2.defProj = defaultProjOf();
         go('t2');
       } else T2[key] = el.value;
     };
@@ -806,7 +831,7 @@ document.addEventListener('click', e => {
     T2.entId = ue.dataset.useent;
     const ei = ENTITIES.find(x => x.id === T2.entId);
     T2.ent = ei ? ei.full : '';
-    useRuleSet(T2.entId); go('tool-rules'); return;
+    useRuleSet(T2.entId); T2.defProj = defaultProjOf(); go('tool-rules'); return;
   }
   const dr = e.target.closest('[data-delrule]');
   if (dr) {

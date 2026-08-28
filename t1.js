@@ -36,7 +36,7 @@ const T1_FIXED = {
   集包厂: 920000, 昌记云泰: 120000, 牧童: 90000, 新艺文化: 140000,
 };
 
-const T1 = { date: new Date().toISOString().slice(0, 10), view: 'daily', filterEnt: '' };
+const T1 = { date: new Date().toISOString().slice(0, 10), view: 'daily', filterEnt: '', imp: null };
 
 function t1LoadAcc() {
   try { const s = JSON.parse(localStorage.getItem(T1_ACC_KEY) || 'null'); if (s && s.length) return s; } catch (e) { /* 忽略 */ }
@@ -148,6 +148,170 @@ function t1PutBalance(accId, date, val, from, force) {
 /** 该余额是不是 T2 带进来的 */
 const t1BalFrom = (date, accId) => (t1LoadSrc()[date] || {})[accId] || '';
 
+/* ============ 台账导入 ============ */
+/* 一个入口两件事：导账户台账；表里带余额列就顺手把余额也导了。
+   只写 T1 自己的三份数据（账户台账 / 月固定支出 / 每日余额），不碰别的模块。 */
+
+const T1_IMP_ALIAS = {
+  ent:   ['主体', '公司', '单位', '企业', '所属'],
+  name:  ['账户名', '账户', '平台', '户名', '开户行'],
+  no:    ['账号', '卡号', '银行账号'],
+  type:  ['类型', '性质', '类别'],
+  fixed: ['月固定支出', '固定支出', '月支出', '月均支出'],
+  bal:   ['余额', '当前余额', '账户余额'],
+  date:  ['日期', '余额日期', '数据日期'],
+};
+const T1_IMP_FIELDS = [
+  ['ent', '主体', 1], ['name', '账户 / 平台', 1], ['no', '账号', 0],
+  ['type', '类型', 0], ['fixed', '月固定支出', 0], ['bal', '余额', 0], ['date', '余额日期', 0],
+];
+
+/* 新账户编号取现有最大序号 +1。不能用 length —— 删过账户会撞号 */
+function t1NextSeq() {
+  let max = 0;
+  T1_ACC.forEach(a => { const m = /^A(\d+)$/.exec(a.id || ''); if (m) max = Math.max(max, +m[1]); });
+  return max + 1;
+}
+const t1MkId = n => 'A' + String(n).padStart(3, '0');
+const t1Norm = v => String(v == null ? '' : v).replace(/\s|　/g, '');
+const t1ImpType = v => (/平台|电商|店|网店|plat/i.test(String(v)) ? 'plat' : 'bank');
+
+function t1ImpAutoMap(header) {
+  const cells = header.map(t1Norm);
+  const map = {}, used = new Set();
+  // 先精确后包含，避免「账户名」被「账户」抢走
+  [1, 0].forEach(exact => {
+    T1_IMP_FIELDS.forEach(([k]) => {
+      if (map[k] !== undefined) return;
+      for (let i = 0; i < cells.length; i++) {
+        if (used.has(i) || !cells[i]) continue;
+        const hit = T1_IMP_ALIAS[k].some(a => (exact ? cells[i] === a : cells[i].includes(a)));
+        if (hit) { map[k] = i; used.add(i); break; }
+      }
+    });
+  });
+  return map;
+}
+
+async function t1ImpLoad(file) {
+  try {
+    toast('正在解析…');
+    const rows = await XLSXLite.readTable(file);
+    const allAlias = Object.keys(T1_IMP_ALIAS).reduce((a, k) => a.concat(T1_IMP_ALIAS[k]), []);
+    const headRow = XLSXLite.findHeaderRow(rows, allAlias);
+    T1.imp = { fileName: file.name, rows, headRow, map: t1ImpAutoMap(rows[headRow] || []), offStale: 0 };
+    go('t1-imp');
+    toast(`读到 ${rows.length} 行，表头定在第 ${headRow + 1} 行`);
+  } catch (e) { toast('读取失败：' + e.message, 4200); }
+}
+
+/* 账户匹配：账号是唯一的，优先按账号认；没账号才退回「主体+账户名」。
+   认上了就复用原 id —— 历史余额按 id 存，换了 id 等于把历史全丢了。 */
+function t1FindAcc(ent, name, no) {
+  if (no) { const byNo = T1_ACC.find(a => a.no && t1Norm(a.no) === t1Norm(no)); if (byNo) return byNo; }
+  return T1_ACC.find(a => t1Norm(a.ent) === t1Norm(ent) && t1Norm(a.name) === t1Norm(name)) || null;
+}
+
+/* 先算清楚要改什么再落盘。预览和真正导入共用这一份，避免两边算法走样。 */
+function t1ImpPlan() {
+  const im = T1.imp;
+  const out = { add: [], upd: [], same: [], bad: [], dup: 0, fixed: {}, bals: [], keys: new Set() };
+  if (!im || im.map.ent === undefined || im.map.name === undefined) return out;
+  const seen = new Set();
+  im.rows.slice(im.headRow + 1).forEach((r, i) => {
+    const cell = k => (im.map[k] === undefined ? '' : String(r[im.map[k]] == null ? '' : r[im.map[k]]).trim());
+    const ent = cell('ent'), name = cell('name'), no = cell('no');
+    const blank = !r.some(c => String(c == null ? '' : c).trim());
+    if (!ent || !name) {
+      if (!blank) out.bad.push({ no: im.headRow + i + 2, ent, name, why: !ent ? '缺主体' : '缺账户名' });
+      return;
+    }
+    const key = t1Norm(ent) + '' + t1Norm(name);
+    if (seen.has(key)) { out.dup++; return; }
+    seen.add(key); out.keys.add(key);
+
+    const type = im.map.type === undefined ? null : t1ImpType(cell('type'));
+    if (im.map.fixed !== undefined) {
+      const f = Number(cell('fixed').replace(/[,，¥￥]/g, ''));
+      if (!isNaN(f) && f > 0 && out.fixed[ent] === undefined) out.fixed[ent] = f;
+    }
+    const hit = t1FindAcc(ent, name, no);
+    if (!hit) out.add.push({ ent, name, no, type: type || 'bank' });
+    else {
+      const chg = [];
+      if (no && t1Norm(hit.no) !== t1Norm(no)) chg.push('账号');
+      if (type && hit.type !== type) chg.push('类型');
+      if (!hit.on) chg.push('重新启用');
+      if (t1Norm(hit.name) !== t1Norm(name)) chg.push('账户名');
+      if (chg.length) out.upd.push({ id: hit.id, ent, name, no, type, chg });
+      else out.same.push({ ent, name });
+    }
+    // 余额列：有值才导，没有就只导台账
+    if (im.map.bal !== undefined) {
+      const v = Number(cell('bal').replace(/[,，¥￥]/g, ''));
+      if (cell('bal') !== '' && !isNaN(v)) {
+        const d = im.map.date !== undefined && cell('date') ? normDate(cell('date')) : T1.date;
+        out.bals.push({ key, ent, name, no, date: d, val: v });
+      }
+    }
+  });
+  return out;
+}
+
+function t1ImpApply() {
+  const plan = t1ImpPlan();
+  let seq = t1NextSeq();
+  const idOf = {};
+  plan.add.forEach(a => {
+    const id = t1MkId(seq++);
+    T1_ACC.push({ id, ent: a.ent, name: a.name, type: a.type, no: a.no || '', on: 1 });
+    idOf[t1Norm(a.ent) + '' + t1Norm(a.name)] = id;
+  });
+  plan.upd.forEach(u => {
+    const a = T1_ACC.find(x => x.id === u.id);
+    if (!a) return;
+    if (u.no) a.no = u.no;
+    if (u.type) a.type = u.type;
+    a.name = u.name; a.on = 1;
+    idOf[t1Norm(u.ent) + '' + t1Norm(u.name)] = a.id;
+  });
+  plan.same.forEach(s => {
+    const a = t1FindAcc(s.ent, s.name, '');
+    if (a) idOf[t1Norm(s.ent) + '' + t1Norm(s.name)] = a.id;
+  });
+  // 表里没有的在管账户 → 停用而不是删除，历史余额一律保留
+  let off = 0;
+  if (T1.imp.offStale) {
+    T1_ACC.forEach(a => {
+      if (a.on && !plan.keys.has(t1Norm(a.ent) + '' + t1Norm(a.name))) { a.on = 0; off++; }
+    });
+  }
+  Object.keys(plan.fixed).forEach(e => { T1_CFG.fixed[e] = plan.fixed[e]; });
+  t1SaveAcc(T1_ACC); t1SaveCfg(T1_CFG);
+
+  // 余额：导入的表是用户自己给的口径，直接写；来源标 T1导入，跟 T2 流水分得开
+  let nb = 0;
+  plan.bals.forEach(b => {
+    const id = idOf[b.key]; if (!id) return;
+    if (t1PutBalance(id, b.date, b.val, 'T1导入', 1).ok) nb++;
+  });
+
+  T1.imp = null;
+  toast(`导入完成：新增 ${plan.add.length} 户、更新 ${plan.upd.length} 户`
+    + (nb ? `、余额 ${nb} 条` : '') + (off ? `、停用 ${off} 户` : ''), 4600);
+  go('t1-acc');
+}
+
+function t1ImpTemplate() {
+  download('账户台账导入模板.csv', toCSV([
+    ['主体', '账户/平台', '账号', '类型', '月固定支出', '余额', '余额日期'],
+    ['优栖', '建行基本户', '6215****1234', '银行', '520000', '130547.25', T1.date],
+    ['优栖', '抖店账户', '', '平台', '', '', ''],
+    ['澳乐', '工行基本户', '6222****5678', '银行', '1860000', '', ''],
+  ]));
+  toast('模板已下载');
+}
+
 /* ============ 界面 ============ */
 S['t1'] = () => {
   const ents = t1ByEnt(T1.date);
@@ -178,6 +342,7 @@ S['t1'] = () => {
     '工具箱 · 已上线',
     `<input type="date" id="t1date" value="${T1.date}">
      <button class="btn" data-t1go="acc">账户台账</button>
+     <button class="btn" data-t1go="imp">导入</button>
      <button class="btn" data-t1go="entry">录入余额</button>
      <button class="btn pri" data-t1act="gen">生成日报</button>`)
     + kpis([
@@ -258,6 +423,7 @@ S['t1-acc'] = () => {
   ]);
   return head('账户台账', `在管 <b>${T1_ACC.filter(a => a.on).length}</b> / 共 ${T1_ACC.length} 个。改完点保存。`, '工具箱 · T1',
     `<button class="btn" data-t1go="daily">← 返回</button>
+     <button class="btn" data-t1go="imp">导入台账</button>
      <button class="btn" data-t1act="addAcc">+ 新增账户</button>
      <button class="btn pri" data-t1act="saveAcc">保存台账</button>`)
     + `<div class="note"><b>预置了 ${T1_PRESET.length} 个账户</b>（按访谈里 47 户的结构估的），实际户名和数量请按你们真实情况改。<b>停用的账户不进日报</b>，但历史数据保留。</div>`
@@ -266,6 +432,73 @@ S['t1-acc'] = () => {
       [{ t: '编号' }, { t: '主体' }, { t: '账户 / 平台' }, { t: '账号' }, { t: '类型' }, { t: '状态' }, { t: '' }], rows))
     + card('各主体月固定支出（算覆盖倍数用）', table(
       [{ t: '主体' }, { t: '月固定支出（元）', n: 1 }, { t: '折合' }], fixRows));
+};
+
+/* 导入台账 */
+S['t1-imp'] = () => {
+  const im = T1.imp;
+  const tools = `<button class="btn" data-t1go="acc">← 返回台账</button>
+     <button class="btn" data-t1act="impTpl">下载模板</button>`;
+
+  if (!im) {
+    return head('导入账户台账', '一张表把账户建好。<b>带余额列就顺手把余额也导了</b>——不带就只导台账。', '工具箱 · T1', tools)
+      + cardp('选择文件', `
+        <input type="file" id="t1file" accept=".xlsx,.csv,.txt">
+        <div class="note" style="margin-top:11px"><b>表里至少要有「主体」和「账户/平台」两列</b>，其余都是选填：
+          账号（填了 T2 才能按账号认账户）、类型（银行/平台）、月固定支出、余额、余额日期。
+          列名不用跟模板一字不差，认得出就行；认错了下一步能手动改。</div>
+        <div class="note"><b>已有账户不会被重建。</b>按账号认，没账号就按「主体+账户名」认——认上了复用原编号，
+          历史余额是按编号存的，换编号等于把历史丢了。</div>`);
+  }
+
+  const header = im.rows[im.headRow] || [];
+  const preview = im.rows.slice(im.headRow + 1, im.headRow + 4);
+  const sampleOf = j => {
+    const v = preview.map(r => r && r[j]).find(x => String(x == null ? '' : x).trim() !== '');
+    return v === undefined ? '' : ' ＝ ' + String(v).slice(0, 10);
+  };
+  const opts = k => header.map((h, j) =>
+    `<option value="${j}" ${im.map[k] === j ? 'selected' : ''}>第${j + 1}列 ${H(String(h || '(空)').slice(0, 14))}${H(sampleOf(j))}</option>`).join('');
+  const mapRows = T1_IMP_FIELDS.map(([k, n, must]) => [
+    H(n) + (must ? ' <span class="red">*</span>' : ''),
+    `<select data-t1map="${k}"><option value="">— 不使用 —</option>${opts(k)}</select>`,
+    im.map[k] !== undefined ? `<span class="mut">${H(String(preview[0] && preview[0][im.map[k]] || '').slice(0, 22))}</span>` : '<span class="mut">—</span>',
+  ]);
+  const headOpts = im.rows.slice(0, Math.min(im.rows.length, 12)).map((r, i) =>
+    `<option value="${i}" ${i === im.headRow ? 'selected' : ''}>第 ${i + 1} 行：${H(r.filter(Boolean).slice(0, 4).join(' | ').slice(0, 46))}</option>`).join('');
+
+  const p = t1ImpPlan();
+  const ready = im.map.ent !== undefined && im.map.name !== undefined;
+  const cut = (arr, n) => arr.slice(0, n).map(x => `${H(x.ent)} · ${H(x.name)}`).join('、')
+    + (arr.length > n ? ` … 等 ${arr.length} 户` : '');
+
+  return head('导入账户台账', `${H(im.fileName)} · ${im.rows.length} 行`, '工具箱 · T1', tools)
+    + cardp('表头在第几行', `<select id="t1head" style="min-width:340px">${headOpts}</select>`)
+    + card('列对应关系', table([{ t: '字段' }, { t: '对应哪一列' }, { t: '示例值' }], mapRows))
+    + (ready ? kpis([
+      { k: '新增账户', v: String(p.add.length), u: '户', t: p.add.length ? 'g' : '' },
+      { k: '更新账户', v: String(p.upd.length), u: '户', t: p.upd.length ? 'w' : '' },
+      { k: '无变化', v: String(p.same.length), u: '户' },
+      { k: '带余额', v: String(p.bals.length), u: '条', t: p.bals.length ? 'g' : '' },
+      { k: '问题行', v: String(p.bad.length), u: '行', t: p.bad.length ? 'c' : 'g' },
+    ]) : '<div class="note c"><b>还不能继续：</b>「主体」和「账户 / 平台」两列必须对应上。</div>')
+    + (ready && p.add.length ? `<div class="note g"><b>会新增 ${p.add.length} 户：</b>${cut(p.add, 8)}</div>` : '')
+    + (ready && p.upd.length ? `<div class="note w"><b>会更新 ${p.upd.length} 户</b>（复用原编号，历史余额不丢）：${
+        p.upd.slice(0, 6).map(u => `${H(u.ent)} · ${H(u.name)}（${u.chg.join('、')}）`).join('；')}${p.upd.length > 6 ? ' …' : ''}</div>` : '')
+    + (ready && p.dup ? `<div class="note w"><b>文件里有 ${p.dup} 行重复</b>（主体+账户名相同），只取第一次出现的那行。</div>` : '')
+    + (ready && p.bad.length ? `<div class="note c"><b>${p.bad.length} 行没法用，会跳过：</b>${
+        p.bad.slice(0, 5).map(b => `第 ${b.no} 行 ${b.why}`).join('；')}${p.bad.length > 5 ? ' …' : ''}</div>` : '')
+    + (ready && p.bals.length ? `<div class="note"><b>余额会写到 ${
+        [...new Set(p.bals.map(b => b.date))].join('、')}</b>，在 T1 里标「来自 T1导入」。
+        表里没有余额日期列时用当前选的日期 ${T1.date}。</div>` : '')
+    + cardp('导入方式', `<label style="font-size:12px"><input type="checkbox" id="t1off" ${im.offStale ? 'checked' : ''}>
+        把「这张表里没有、但当前在管」的账户设为<b>停用</b></label>
+      <div class="note" style="margin-top:9px"><b>不勾就是纯追加合并</b>：表里没提到的账户原样不动。
+        勾了也只是停用、<b>不删除</b>，历史余额一律保留，随时能在台账里改回在管。</div>`)
+    + `<div style="display:flex;gap:9px;justify-content:flex-end;margin-top:6px">
+        <button class="btn" data-t1act="impCancel">换个文件</button>
+        <button class="btn pri" data-t1act="impApply" ${ready ? '' : 'disabled'}>确认导入</button>
+      </div>`;
 };
 
 /* 日报文本 */
@@ -374,6 +607,15 @@ document.addEventListener('click', e => {
       });
   }
   else if (act === 'dl') t1Export();
+  else if (act === 'impTpl') t1ImpTemplate();
+  else if (act === 'impCancel') { T1.imp = null; go('t1-imp'); }
+  else if (act === 'impApply') {
+    const p = t1ImpPlan();
+    if (!p.add.length && !p.upd.length && !p.bals.length && !Object.keys(p.fixed).length && !T1.imp.offStale) {
+      toast('这张表没有需要写入的改动'); return;
+    }
+    t1ImpApply();
+  }
   else if (act === 'addAcc') {
     const id = 'A' + String(T1_ACC.length + 1).padStart(3, '0');
     T1_ACC.push({ id, ent: '新主体', name: '新账户', type: 'bank', on: 1 });
@@ -395,6 +637,18 @@ document.addEventListener('click', e => {
   }
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 't1file' && e.target.files && e.target.files[0]) { t1ImpLoad(e.target.files[0]); return; }
+  if (e.target.id === 't1head' && T1.imp) {
+    T1.imp.headRow = +e.target.value;
+    T1.imp.map = t1ImpAutoMap(T1.imp.rows[T1.imp.headRow] || []);
+    go('t1-imp'); return;
+  }
+  if (e.target.id === 't1off' && T1.imp) { T1.imp.offStale = e.target.checked ? 1 : 0; go('t1-imp'); return; }
+  if (e.target.dataset && e.target.dataset.t1map && T1.imp) {
+    const k = e.target.dataset.t1map;
+    if (e.target.value === '') delete T1.imp.map[k]; else T1.imp.map[k] = +e.target.value;
+    go('t1-imp'); return;
+  }
   if (e.target.id === 't1date') { T1.date = e.target.value; go(location.hash ? 't1' : 't1'); }
   if (e.target.id === 't1entFilter') { T1.filterEnt = e.target.value; go('t1-entry'); }
   if (e.target.id === 't1ratio') { T1_CFG.ratio = Number(e.target.value) || 1.5; t1SaveCfg(T1_CFG); go('t1'); }

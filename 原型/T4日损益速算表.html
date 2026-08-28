@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>T4 日损益速算表</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ink:#16202B;--indigo:#2B5CE6;--seal:#C8352B;--jade:#10796B;--amber:#B4700E;
+  --bg:#FAFBFC;--surface:#FFFFFF;--surface-2:#F1F4F7;--surface-3:#E7ECF1;
+  --text:var(--ink);--text-2:#5B6B7C;--text-3:#8695A4;
+  --border:#DDE4EA;--border-2:#C8D2DB;
+  --bar:#1B2733;--bar-text:#9DAFBE;
+  --accent:var(--indigo);--accent-soft:#E8EEFD;
+  --good:var(--jade);--good-soft:#E2F1EE;
+  --warn:var(--amber);--warn-soft:#FBF0DC;
+  --crit:var(--seal);--crit-soft:#FBE8E6;
+  --shadow:0 1px 2px rgba(22,32,43,.06),0 4px 12px rgba(22,32,43,.05);
+  --f-body:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+  --f-mono:"IBM Plex Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101922;--surface:#16212C;--surface-2:#1D2A37;--surface-3:#25343F;
+  --text:#E6EDF3;--text-2:#9BAAB8;--text-3:#71818F;--border:#26343F;--border-2:#33444F;
+  --bar:#0B1219;--accent:#7CA0F5;--accent-soft:#1B2942;--good:#4FBFA9;--good-soft:#122E2B;
+  --warn:#DFA33F;--warn-soft:#33280F;--crit:#E5766B;--crit-soft:#3A1C19;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.25);
+}}
+:root[data-theme="dark"]{
+  --bg:#101922;--surface:#16212C;--surface-2:#1D2A37;--surface-3:#25343F;
+  --text:#E6EDF3;--text-2:#9BAAB8;--text-3:#71818F;--border:#26343F;--border-2:#33444F;
+  --bar:#0B1219;--accent:#7CA0F5;--accent-soft:#1B2942;--good:#4FBFA9;--good-soft:#122E2B;
+  --warn:#DFA33F;--warn-soft:#33280F;--crit:#E5766B;--crit-soft:#3A1C19;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--f-body);font-size:13px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{margin:0;font-weight:600;text-wrap:balance}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.bar1{display:flex;align-items:center;gap:10px;background:var(--bar);padding:0 16px;height:46px;position:sticky;top:0;z-index:40}
+.bar1 .logo{width:26px;height:26px;border-radius:6px;background:var(--indigo);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700}
+.bar1 .t{font-size:13.5px;color:#fff;font-weight:500}
+.bar1 .t i{font-style:normal;font-family:var(--f-mono);font-size:9.5px;color:#637585;margin-left:8px}
+.bar1 .sp{flex:1}
+.ibtn{background:rgba(255,255,255,.08);border:none;color:var(--bar-text);border-radius:6px;cursor:pointer;padding:5px 10px;font-size:12px;font-family:inherit}
+.ibtn:hover{background:rgba(255,255,255,.15);color:#fff}
+.bar2{display:flex;gap:2px;background:var(--surface);border-bottom:1px solid var(--border);padding:0 16px;position:sticky;top:46px;z-index:35;overflow-x:auto}
+.bar2 button{background:none;border:none;border-bottom:2px solid transparent;color:var(--text-2);font-family:inherit;font-size:12.5px;padding:10px 13px 8px;cursor:pointer;white-space:nowrap}
+.bar2 button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
+.wrap{padding:20px 16px 70px;max-width:1460px}
+.phead{margin-bottom:15px}
+.phead h2{font-size:19px}
+.phead .s{color:var(--text-2);font-size:12.5px;margin-top:4px;max-width:82ch}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(142px,1fr));gap:9px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
+.kpi.g::before{background:var(--good)}.kpi.w::before{background:var(--warn)}.kpi.c::before{background:var(--crit)}
+.kpi .k{font-size:11px;color:var(--text-2)}
+.kpi .v{font-family:var(--f-mono);font-size:21px;font-weight:600;margin-top:2px}
+.kpi .v small{font-size:11px;font-weight:400;color:var(--text-3);margin-left:2px}
+.kpi.c .v{color:var(--crit)}.kpi.w .v{color:var(--warn)}.kpi.g .v{color:var(--good)}
+.kpi .d{font-size:10.5px;color:var(--text-3);margin-top:1px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:9px;box-shadow:var(--shadow);margin-bottom:13px;overflow:hidden}
+.card>.ch{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface-2);flex-wrap:wrap}
+.card>.ch h3{font-size:13px}
+.card>.ch .sp{flex:1}
+.card>.cb{padding:14px}
+.card>.cb.flush{padding:0}
+.cols{display:grid;gap:13px}.c2{grid-template-columns:1fr 1fr}.c21{grid-template-columns:1.6fr 1fr}
+@media (max-width:1020px){.c2,.c21{grid-template-columns:1fr}}
+.tw{overflow:auto;max-height:66vh}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+thead th{background:var(--surface-2);font-weight:500;font-size:10.5px;color:var(--text-2);letter-spacing:.05em;position:sticky;top:0;z-index:2}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+tfoot td{background:var(--surface-2);font-weight:600;border-top:2px solid var(--border-2)}
+.red{color:var(--crit);font-weight:500}.grn{color:var(--good)}.mut{color:var(--text-3)}
+.pill{display:inline-flex;border-radius:20px;padding:1px 8px;font-size:10.5px;font-weight:500;white-space:nowrap}
+.p-ok{background:var(--good-soft);color:var(--good)}.p-wa{background:var(--warn-soft);color:var(--warn)}
+.p-cr{background:var(--crit-soft);color:var(--crit)}.p-in{background:var(--accent-soft);color:var(--accent)}
+.p-mu{background:var(--surface-3);color:var(--text-2)}
+.code{font-family:var(--f-mono);font-size:11px;background:var(--surface-3);border-radius:3px;padding:1px 5px;color:var(--text-2)}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 7px 7px 0;font-size:12.5px;margin-bottom:13px}
+.note.c{border-left-color:var(--crit);background:var(--crit-soft)}
+.note.w{border-left-color:var(--warn);background:var(--warn-soft)}
+.note.g{border-left-color:var(--good);background:var(--good-soft)}
+.note b{font-weight:700}
+.btn{font-family:inherit;font-size:12px;border-radius:6px;padding:6px 13px;cursor:pointer;border:1px solid var(--border-2);background:var(--surface);color:var(--text)}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+/* 日历热力 */
+.cal{display:flex;gap:2px;flex-wrap:wrap}
+.cal i{width:19px;height:19px;border-radius:4px;background:var(--surface-3);display:grid;place-items:center;font-size:9px;font-style:normal;color:var(--text-3);font-family:var(--f-mono)}
+.cal i.f{background:var(--good);color:#fff}
+.cal i.p{background:var(--warn);color:#fff}
+.cal i.n{background:var(--surface-3);color:var(--text-3)}
+.cal i.x{background:var(--crit-soft);color:var(--crit);border:1px solid var(--crit)}
+.lg{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-2);margin-top:9px;align-items:center}
+.lg em{width:11px;height:11px;border-radius:3px;display:inline-block;vertical-align:-1px;margin-right:4px}
+/* 三层 */
+.tier{border-left:3px solid var(--border-2);padding-left:13px;margin-bottom:11px}
+.tier.t3{border-left-color:var(--accent)}
+.tier.t2{border-left-color:var(--warn)}
+.tier.t1{border-left-color:var(--good)}
+.tier .tt{font-size:12px;font-weight:600;margin-bottom:3px}
+.tier .td2{font-size:11.5px;color:var(--text-2)}
+.flow{display:flex;overflow-x:auto;margin:6px 0 14px}
+.step{flex:1;min-width:118px;background:var(--surface-2);border:1px solid var(--border);padding:9px 11px}
+.step:first-child{border-radius:7px 0 0 7px}.step:last-child{border-radius:0 7px 7px 0}
+.step+.step{border-left:none}
+.step .sn{font-family:var(--f-mono);font-size:9px;color:var(--text-3)}
+.step .st{font-size:12px;font-weight:500;margin-top:2px}
+.step.hot{background:var(--crit-soft);border-color:var(--crit)}
+.step.hot .st{color:var(--crit)}
+.screen{display:none}.screen.on{display:block}
+button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<div class="bar1">
+  <span class="logo">财</span>
+  <span class="t">T4　日损益速算表<i>方案与原型 · 待确认</i></span>
+  <span class="sp"></span>
+  <button class="ibtn" id="themeBtn">◐</button>
+</div>
+<div class="bar2" id="nav"></div>
+<div class="wrap" id="view"></div>
+
+<script>
+const H=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const money=n=>(Number(n)||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const pill=(t,k)=>`<span class="pill p-${k}">${H(t)}</span>`;
+const kpis=a=>`<div class="kpis">${a.map(k=>`<div class="kpi ${k.t||''}"><div class="k">${H(k.k)}</div><div class="v">${k.v}${k.u?`<small>${H(k.u)}</small>`:''}</div>${k.d?`<div class="d">${H(k.d)}</div>`:''}</div>`).join('')}</div>`;
+const table=(c,r,f)=>`<div class="tw"><table><thead><tr>${c.map(x=>`<th class="${x.n?'num':''}">${H(x.t)}</th>`).join('')}</tr></thead><tbody>${r.map(row=>`<tr>${row.map((x,i)=>`<td class="${c[i]&&c[i].n?'num':''}">${x}</td>`).join('')}</tr>`).join('')}</tbody>${f?`<tfoot><tr>${f.map((x,i)=>`<td class="${c[i]&&c[i].n?'num':''}">${x}</td>`).join('')}</tr></tfoot>`:''}</table></div>`;
+const card=(t,b,tools)=>`<div class="card"><div class="ch"><h3>${H(t)}</h3><span class="sp"></span>${tools||''}</div><div class="cb flush">${b}</div></div>`;
+const cardp=(t,b,tools)=>`<div class="card"><div class="ch"><h3>${H(t)}</h3><span class="sp"></span>${tools||''}</div><div class="cb">${b}</div></div>`;
+const head=(t,s)=>`<div class="phead"><h2>${H(t)}</h2><div class="s">${s}</div></div>`;
+
+/* 六个渠道的真实状态（来自 2026-08-24 核查） */
+const CH=[
+  {n:'天猫',       days:[1],                          src:'销售单明细账（只导了 8-1）', col:'K 列 · 步长 4', note:'只取「天猫-澳乐旗舰店」，排除 zzzrest 旗舰店'},
+  {n:'京东自营',   days:Array.from({length:23},(_,i)=>i+1), src:'收入有；推广费给的是 2607 七月文件', col:'I 列 · 步长 4', note:'零售成本无数据源，按收入×45% 硬推'},
+  {n:'京东POP',    days:[4,5,6,8,9,10,11,12,15,16,17,18,19,20,22,23], src:'无，人工填', col:'K 列 · 步长 4', note:''},
+  {n:'唯品会',     days:[],                           src:'无', col:'I 列 · 步长 4', note:'一天未填'},
+  {n:'快手',       days:[9,15,19,20,21],              src:'无，人工填', col:'K 列 · 步长 4', note:'G6/G7 SUMIFS 区域错位 2 列'},
+  {n:'私域',       days:Array.from({length:22},(_,i)=>i+1), src:'无，人工填', col:'E 列 · 步长 2', note:'无三项公摊行 → 汇总列串行 7 行'},
+];
+const DAYS=31;
+
+function cal(days,bad){
+  let h='<div class="cal">';
+  for(let d=1;d<=DAYS;d++){
+    const f=days.includes(d);
+    h+=`<i class="${f?(bad?'x':'f'):'n'}" title="${d} 日">${d}</i>`;
+  }
+  return h+'</div>';
+}
+
+const S={};
+
+/* ── 方案 ── */
+S.plan=()=>head('方案','先说清楚一件事：这张表真正的问题不是算得慢，是<b>算得不可信</b>。工具如果只把填数自动化，会把错误一起自动化。')
++ kpis([
+  {k:'现状耗时',v:'55',u:'h/月',t:'c',d:'两人 × 每日 1—1.5h'},
+  {k:'目标耗时',v:'≤20',u:'h/月',t:'g',d:'省约 35 h'},
+  {k:'已知公式缺陷',v:'5',u:'处',t:'c',d:'均未修复'},
+  {k:'渠道',v:'6',u:'个',d:'三层结构'},
+  {k:'汇总可用性',v:'不可用',t:'c',d:'各渠道天数不对齐'},
+])
++ `<div class="note c"><b>核心判断：</b>现有工作簿的合计数<b>目前不能用于经营会</b>。原因有三——① 5 处跨表公式缺陷（私域列整体串行 7 行，导致事业部「房租物业水电-公摊」算出 <b>-659.18 元的负房租</b>）；② 六个渠道取数天数从 0 到 23 天不等，汇总把「22 天的私域」和「1 天的天猫」加在一起；③ 京东自营零售成本无数据源，按收入×45% 硬推，<b>毛利率恒等于 55% 是设定值不是算出来的</b>。</div>`
+
++ cardp('三层结构（工具必须原生支持，不能拍平）',
+  `<div class="tier t3"><div class="tt">第 3 层　澳乐事业部汇总损益</div>
+    <div class="td2">全公式，只有月累计、无日列 = 天猫 + 特卖平台 + 快手 + 私域</div></div>
+   <div class="tier t2"><div class="tt">第 2 层　特卖汇总</div>
+    <div class="td2">全公式，有日列 = 京东自营 + 唯品会 + 京东POP 逐日相加。<b>「特卖平台」是渠道分组，不是清货口径</b>——别和各表的「剔除清货」列混为一谈</div></div>
+   <div class="tier t1"><div class="tt">第 1 层　6 个渠道子表</div>
+    <div class="td2">天猫 / 京东自营 / 唯品会 / 京东POP / 快手 / 私域 —— <b>只有这一层需要外部数据源</b></div></div>
+   <div class="note" style="margin:12px 0 0"><b>规则：</b>补数只补第 1 层。汇总层由工具按口径重算，<b>不导入、不接受人工填写</b>。</div>`)
+
++ cardp('工具怎么做',
+  `<div class="flow">
+    <div class="step"><div class="sn">01</div><div class="st">导入源文件</div></div>
+    <div class="step"><div class="sn">02</div><div class="st">按渠道口径取数</div></div>
+    <div class="step hot"><div class="sn">03</div><div class="st">数据完整性检查</div></div>
+    <div class="step"><div class="sn">04</div><div class="st">逐日算毛利</div></div>
+    <div class="step"><div class="sn">05</div><div class="st">三层自动汇总</div></div>
+    <div class="step hot"><div class="sn">06</div><div class="st">硬推口径标注</div></div>
+    <div class="step"><div class="sn">07</div><div class="st">异常标记</div></div>
+    <div class="step"><div class="sn">08</div><div class="st">人工判断</div></div>
+    <div class="step"><div class="sn">09</div><div class="st">导出/推送</div></div>
+  </div>
+  <div class="note g" style="margin:0"><b>相对 Excel 的四处改变：</b>① 汇总层由工具算，杜绝跨表公式串行；② 各渠道取数天数<b>可视化且不对齐就拦住</b>，不让残缺数据进汇总；③ 硬推口径（如 45%）在界面上<b>明确标出来</b>，不伪装成计算结果；④ 列偏移、行号差异由工具内部消化，用户不再需要记「天猫在 K 列、私域在 E 列」。</div>`)
+
++ `<div class="note w"><b>关于 T5 商品对码的依赖，这里要澄清一下：</b>我之前说 T4 必须等 T5。看到你们表的真实结构后，<b>这个判断要修正</b>——这张表是<b>按渠道汇总</b>的（收入、推广费、毛利），不是按 SKU 明细算成本，所以<b>不依赖商品对码表</b>。T5 的前置约束只对「SKU 级毛利分析」成立。<b>T4 可以现在就做。</b></div>`;
+
+/* ── 数据完整性 ── */
+S.integ=()=>{
+  const rows=CH.map(c=>{
+    const n=c.days.length;
+    const st=n===0?pill('未开始','cr'):n<=5?pill('严重缺','cr'):n<15?pill('缺口大','wa'):pill('较完整','ok');
+    return [c.n,`<b class="mono">${n}</b> / ${DAYS}`,cal(c.days),H(c.src),st];
+  });
+  return head('数据完整性','这是本工具最重要的一屏。<b>汇总数能不能用，取决于各渠道取数天数是否对齐</b>——现在不对齐，所以汇总不可用。')
+  + kpis([
+    {k:'渠道',v:'6',u:'个'},
+    {k:'最多已填',v:'23',u:'天',d:'京东自营'},
+    {k:'最少已填',v:'0',u:'天',t:'c',d:'唯品会'},
+    {k:'天数极差',v:'23',u:'天',t:'c',d:'汇总不可用的直接原因'},
+    {k:'有源文件',v:'2',u:'/ 6',t:'c',d:'其余人工填'},
+    {k:'汇总可用',v:'否',t:'c'},
+  ])
+  + `<div class="note c"><b>拦截规则（本工具核心）：</b>当任意两个渠道的取数天数差 &gt; <b>2 天</b>时，<b>禁止生成事业部汇总</b>，只允许看单渠道。这条是硬的——把 22 天的私域和 1 天的天猫加起来得到的数，拿去开经营会比没有数更危险。</div>`
+  + card('六渠道取数进度（2026 年 8 月）',table(
+    [{t:'渠道'},{t:'已填',n:1},{t:'日历（1—31）'},{t:'数据源'},{t:'状态'}],rows))
+  + `<div class="lg"><span><em style="background:var(--good)"></em>已填</span><span><em style="background:var(--surface-3)"></em>未填</span></div>`
+  + `<div class="cols c2" style="margin-top:13px">
+    ${cardp('为什么这一屏排在算数之前',
+      `<div style="font-size:12.5px;line-height:1.85">Excel 里没有这一层，所以人看到汇总表有数，就以为能用。<br><br>
+      实际上 <span class="code">SUMIFS</span> 会把不同天数的渠道直接相加——数字算得出来，但它<b>没有业务含义</b>。<br><br>
+      <b>工具先回答「这个数能不能信」，再回答「这个数是多少」。</b></div>`)}
+    ${cardp('缺口怎么补',table([{t:'渠道'},{t:'补法'}],[
+      ['天猫','销售单明细账只导了 8-1，需重导全月'],
+      ['京东自营','推广费给的是 2607 七月文件，需换 2608'],
+      ['京东POP / 私域 / 快手','无源文件，维持人工填'],
+      ['唯品会','一天未填，需确认是否有业务'],
+    ]))}
+  </div>`;
+};
+
+/* ── 口径规则 ── */
+S.rules=()=>head('取数口径规则','各渠道口径不同，且有硬推项。规则显式化、可编辑、可追溯——不再靠人记。')
++ `<div class="note"><b>为什么要做成规则库：</b>这些口径现在只存在于两位会计的脑子里和聊天记录里。人一休假就断档。规则写进工具，新人也能跑。</div>`
++ card('已确认口径',table(
+  [{t:'渠道'},{t:'项目'},{t:'取数规则'},{t:'类型'}],
+  [
+    ['天猫','收入','销售单明细账 → <b>只取「天猫-澳乐旗舰店」</b>，排除 zzzrest 旗舰店（属另一事业部）',pill('过滤','in')],
+    ['天猫','直通车','按<b>记账时间</b>归属，不按消耗日',pill('归属口径','wa')],
+    ['天猫','CPS','按明细表<b>日期列</b>归属',pill('归属口径','wa')],
+    ['京东自营','收入','「京东自营收入交易概况」→ 当日成交金额 → 零售收入·实际',pill('直取','ok')],
+    ['京东自营','推广费','「京准通推广费」→ 当日支出金额，<b>源表为负数，需取绝对值</b>',pill('符号处理','wa')],
+    ['京东自营','零售成本','<b class="red">无数据源，按 收入 × 45% 硬推</b>',pill('硬推','cr')],
+    ['京东自营','退货','<b class="red">按 -16% 硬推</b>',pill('硬推','cr')],
+    ['全渠道','剔除清货列','无清货订单时与「实际」列同值',pill('惯例','mu')],
+  ]))
++ `<div class="note c"><b>硬推口径必须在报表上标出来。</b>京东自营的零售成本和退货都是拍脑袋的比例，导致<b>毛利率恒等于 55%</b>——这不是算出来的，是设定的。Excel 里看不出区别，工具里必须用颜色和角标区分「算出来的」和「设定的」，否则经营会上会被当成真实经营结果讨论。</div>`
++ cardp('列偏移差异（工具内部消化，用户不用记）',table(
+  [{t:'子表'},{t:'1 日所在列'},{t:'步长'},{t:'备注'}],
+  [
+    ['天猫 / 京东POP / 快手','K',' 4',''],
+    ['京东自营 / 唯品会','I',' 4','少了「吉客云原始数据」列'],
+    ['私域','E',' 2',''],
+    ['特卖汇总','G',' 4',''],
+  ]))
++ `<div class="note w"><b>行号也不统一：</b>天猫推广费拆成 万相台 / 直通车 / 小红书 / CPS 多行，京东自营只有一行「推广费」（第 14 行）。这类差异是这张表最容易填错的地方，也是工具最该消化掉的部分。</div>`;
+
+/* ── 日损益表 ── */
+S.sheet=()=>{
+  const d=[
+    ['08-19','天猫','—','—','—','—',pill('无数据','mu'),''],
+    ['08-19','京东自营',money(186400),money(83880),money(18200),money(84320),'55.0%',pill('含硬推','cr')],
+    ['08-19','京东POP',money(42800),money(28400),money(4200),money(10200),'23.8%',pill('人工填','wa')],
+    ['08-19','唯品会','—','—','—','—',pill('未开始','cr'),''],
+    ['08-19','快手',money(12600),money(8200),money(1400),money(3000),'23.8%',pill('人工填','wa')],
+    ['08-19','私域',money(28400),money(17600),money(0),money(10800),'38.0%',pill('人工填','wa')],
+  ];
+  return head('日损益表','三层结构原生呈现。<b>硬推项标红</b>，缺数据的渠道不参与合计，合计行在数据不对齐时直接禁用。')
+  + `<div class="note c"><b>本期事业部汇总已禁用。</b>渠道取数天数极差 23 天（京东自营 23 天 vs 唯品会 0 天），超过阈值 2 天。可以看单渠道，不能看合计。</div>`
+  + card('单日明细（2026-08-19）',table(
+    [{t:'日期'},{t:'渠道'},{t:'零售收入',n:1},{t:'零售成本',n:1},{t:'推广费',n:1},{t:'边际毛利',n:1},{t:'毛利率'},{t:'口径'}],
+    d,
+    ['<b>合计</b>','<b class="red">已禁用 · 数据不对齐</b>','—','—','—','—','—','']))
+  + `<div class="cols c2">
+    ${cardp('第 2 层　特卖汇总',
+      `<div style="font-size:12.5px;line-height:1.9">= 京东自营 + 唯品会 + 京东POP<br>
+      <span class="mut">由工具逐日相加，不接受导入</span></div>
+      <div class="note c" style="margin:11px 0 0"><b>唯品会 0 天</b>，特卖汇总同样不可用。</div>`)}
+    ${cardp('第 3 层　事业部汇总',
+      `<div style="font-size:12.5px;line-height:1.9">= 天猫 + 特卖平台 + 快手 + 私域<br>
+      <span class="mut">取各子表月累计</span></div>
+      <div class="note c" style="margin:11px 0 0"><b>已禁用。</b>Excel 里这一层现在算出「房租物业水电-公摊 = -659.18 元」的负房租，根因是私域列串行 7 行。</div>`)}
+  </div>`;
+};
+
+/* ── 异常与缺陷 ── */
+S.issue=()=>head('异常与已知缺陷','两类：一类是工具算出来的业务异常，一类是现有 Excel 的结构性缺陷。<b>后者不会被工具继承。</b>')
++ kpis([
+  {k:'Excel 公式缺陷',v:'5',u:'处',t:'c',d:'均未修复'},
+  {k:'硬推口径',v:'2',u:'项',t:'w',d:'京东自营成本与退货'},
+  {k:'业务异常',v:'0',u:'笔',d:'数据补齐后才有意义'},
+])
++ card('现有 Excel 的 5 处缺陷（工具不继承，但你们的表还得修）',table(
+  [{t:'#'},{t:'位置'},{t:'问题'},{t:'后果'},{t:'状态'}],
+  [
+    ['1','汇总 T26~T29','私域列整体<b>串行 7 行</b>：T28 取到私域边际毛利 -1,339.65，T29 取到毛利率 -7.69%（<b>把百分比当金额</b>）','事业部「房租物业水电-公摊」= <b class="red">-659.18 元</b>（负房租）',pill('未修','cr')],
+    ['2','汇总 T22 / T23','私域的直接租金物业、直接其他管理未链接','直接管理费用合计少计',pill('未修','cr')],
+    ['3','汇总 T19','私域子表无税费行','税费少计',pill('未修','cr')],
+    ['4','汇总 L7','<span class="code">=[1]特卖平台!C7</span> 指向<b>外部工作簿</b>，断链','退款金额取不到',pill('未修','cr')],
+    ['5','快手 G6/G7','SUMIFS 求和区 <span class="code">I6:DZ6</span> 与条件区 <span class="code">K3:EB3</span> <b>起点差 2 列</b>','取到错误的列',pill('未修','cr')],
+  ]))
++ `<div class="note w"><b>第 1 处的修法有前提：</b>T26 应改成 <span class="code">=SUM(T27:T29)</span>，但<b>必须先在私域子表补出三项公摊行</b>——根因是私域表压根没有这三行。只改汇总层的指向是治标不治本。</div>`
++ `<div class="note g"><b>工具怎么避免重蹈覆辙：</b>汇总层不用「跨表引用」，而是由代码按渠道结构<b>重新聚合</b>。子表缺某一行时，工具报「私域缺公摊行」，而不是悄悄取到隔壁行的数。</div>`;
+
+/* ── 输出 ── */
+S.out=()=>head('输出','三份：日损益表、完整性报告、异常清单。前者给管理层，后两者给财务自己。')
++ `<div class="cols c2">
+  ${cardp('① 日损益表',`<div style="font-size:12.5px;line-height:1.85">
+    按现有 Excel 的三层结构导出，列结构对齐，可直接替换现有工作簿。<br><br>
+    <b>硬推项带角标</b>，缺数据的日期留空而非填 0。<br><br>
+    <span class="mut">格式：xlsx / CSV / 钉钉推送文本</span></div>`)}
+  ${cardp('② 完整性报告',`<div style="font-size:12.5px;line-height:1.85">
+    六渠道取数天数、缺口日期、数据源到位情况。<br><br>
+    <b>汇总是否可用的结论写在第一行</b>，不用读的人自己判断。<br><br>
+    <span class="mut">这份是给财务经理复核用的</span></div>`)}
+</div>`
++ cardp('③ 异常清单',`<div style="font-size:12.5px;line-height:1.85">
+  毛利率超出阈值、推广费占比异常、某渠道单日收入突变、硬推项占比过高……<br><br>
+  <b>每条都写明「为什么判为异常」和「建议查什么」</b>，不只给一个红色标记。</div>`)
++ `<div class="note"><b>推送节奏沿用现状：</b>算完通过钉钉发给业务和管理层。工具只把「取数→算→排版」这段自动化，<b>判断和发送仍然是人</b>。</div>`;
+
+/* ── 待确认 ── */
+S.confirm=()=>head('需要你确认的 6 件事','确认完我就开发到工具箱。有分歧的地方现在改是十分钟，代码里改是两周。')
++ card('确认清单',table(
+  [{t:'#'},{t:'事项'},{t:'我的建议'},{t:'确认'}],
+  [
+    ['1','<b>不对齐就禁用汇总</b>','渠道取数天数极差 &gt; 2 天时禁止生成汇总，只能看单渠道','☐ 同意　☐ 改阈值：___'],
+    ['2','<b>硬推口径显式标注</b>','京东自营成本 45%、退货 -16% 在报表上标红加角标，不伪装成计算值','☐ 同意　☐ 改为：'],
+    ['3','<b>汇总层不接受导入</b>','特卖汇总与事业部汇总一律由工具算，杜绝跨表公式','☐ 同意　☐ 改为：'],
+    ['4','<b>先做哪几个渠道</b>','先做有源文件的<b>天猫 + 京东自营</b>，其余保持人工填后导入','☐ 同意　☐ 改为：'],
+    ['5','<b>输出是否替换现有工作簿</b>','导出列结构对齐现有 Excel，可直接替换；过渡期两边并行一个月','☐ 同意　☐ 改为：'],
+    ['6','<b>Excel 那 5 处缺陷谁来修</b>','工具不继承缺陷；但你们现有表要不要修、谁修，需要你定','☐ 我来修　☐ 你帮我修　☐ 直接弃用旧表'],
+  ]))
++ `<div class="note c"><b>第 6 条要特别说一下：</b>新工具算对了，不等于旧表就对了。<b>如果经营会还在看旧 Excel，那 5 处缺陷仍然在误导决策</b>——尤其那个 -659.18 元的负房租。是并行一段时间还是直接弃用旧表，你定。</div>`
++ `<div class="note g"><b>一处修正：</b>我之前在工具箱方案里写「T4 依赖 T5 商品对码」。看到你们表的真实结构后这个判断不成立——这张表按<b>渠道</b>汇总，不按 SKU 算成本，<b>不依赖对码表</b>。T4 可以现在就做，不用等 T5。</div>`;
+
+const NAV=[['plan','方案'],['integ','数据完整性'],['rules','取数口径'],['sheet','日损益表'],['issue','异常与缺陷'],['out','输出'],['confirm','待确认 6 项']];
+let cur='plan';
+function render(){
+  document.getElementById('nav').innerHTML=NAV.map(([id,n])=>`<button data-s="${id}" class="${id===cur?'on':''}">${n}</button>`).join('');
+  document.getElementById('view').innerHTML=S[cur]();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-s]');
+  if(b){cur=b.dataset.s;render();}
+});
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  const r=document.documentElement,c=r.getAttribute('data-theme');
+  const sys=matchMedia('(prefers-color-scheme: dark)').matches;
+  r.setAttribute('data-theme',(c||(sys?'dark':'light'))==='dark'?'light':'dark');
+});
+render();
+</script>
+</body>
+</html>

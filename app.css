@@ -193,3 +193,16 @@ label.fl{font-size:11px;color:var(--text-2);display:block;margin-bottom:3px}
 
 button:focus-visible,.btn:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ===== T4 日损益速算表 ===== */
+.t4cal{display:flex;gap:2px;flex-wrap:wrap;min-width:210px}
+.t4cal i{width:17px;height:17px;border-radius:3px;background:var(--surface-3);display:grid;place-items:center;font-size:8.5px;font-style:normal;color:var(--text-3);font-family:var(--f-mono)}
+.t4cal i.f{background:var(--good);color:#fff}
+.t4cal i.h{background:var(--crit);color:#fff}
+.t4cal i.n{background:var(--surface-3);color:var(--text-3)}
+.t4lg{display:flex;gap:15px;flex-wrap:wrap;font-size:11.5px;color:var(--text-2);align-items:center;margin-top:-4px}
+.t4lg em{width:11px;height:11px;border-radius:3px;display:inline-block;vertical-align:-1px;margin-right:5px}
+.t4lg em.f{background:var(--good)} .t4lg em.h{background:var(--crit)} .t4lg em.n{background:var(--surface-3)}
+.t4in{width:96px;min-width:76px;text-align:right;font-family:var(--f-mono);font-size:11.5px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)}
+.t4in:focus{border-color:var(--accent);outline:none}
+.t4in::placeholder{color:var(--text-3)}

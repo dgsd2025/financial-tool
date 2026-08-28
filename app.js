@@ -801,10 +801,12 @@ function t2ClosingBal() {
 /* 把期末余额回写到 T1 的当日余额。
    那天已有手工录的数且对不上时先问，不静默覆盖。 */
 function t2PushBalance() {
-  // 上一次是写到别的账户上的（用户在下拉里改了账户）→ 把那笔撤掉再写新的，
-  // 否则旧账户会凭空多出一笔它从没有过的余额
+  // 同一份文件里改了账户下拉 → 上一次是写错账户了，把那笔撤掉再写新的，
+  // 否则旧账户会凭空多出一笔它从没有过的余额。
+  // 必须核对是同一份文件：不同文件本来就该写到不同账户，不是写错（撤了就是误删）
   const prev = T2.balPush;
-  if (prev && prev.ok && prev.accId && prev.accId !== T2.acctId && typeof t1ClearBalance === 'function') {
+  if (prev && prev.ok && prev.accId && prev.accId !== T2.acctId
+    && T2.file && prev.file === T2.file.name && typeof t1ClearBalance === 'function') {
     t1ClearBalance(prev.accId, prev.date, 'T2', prev.val);
   }
   T2.balPush = null;
@@ -821,28 +823,35 @@ function t2PushBalance() {
     if (!ok) { T2.balPush = { kept: 1, accId: T2.acctId, date: cb.date, val: cb.val, old: r.old }; return; }
     r = t1PutBalance(T2.acctId, cb.date, cb.val, 'T2', 1);
   }
-  T2.balPush = r.ok ? { ok: 1, accId: T2.acctId, date: cb.date, val: cb.val } : { err: r.reason };
+  T2.balPush = r.ok ? { ok: 1, accId: T2.acctId, date: cb.date, val: cb.val, file: T2.file ? T2.file.name : '' } : { err: r.reason };
 }
 
 /* 把这批解析出的流水明细存给 T1（余额下钻「看每一笔」用）。
-   换账户重存时，先把上一次写错账户的那几天撤掉——跟余额回写同一个纪律。 */
+   同一份文件换绑了账户 → 上一次是写错账户，把那几天撤掉——跟余额回写同一个纪律；
+   不同文件之间绝不互删（各自的账户本来就不同）。 */
 function t2PushTxns() {
   if (typeof t1PutTxns !== 'function' || !T2.acctId || !T2.result) return;
   if (!T2.file || T2.result.file !== T2.file.name) return;   // result 是上一个文件的，别写
   const prev = T2.txnPush;
-  if (prev && prev.accId && prev.accId !== T2.acctId && typeof t1DelTxns === 'function') {
-    t1DelTxns(prev.accId, prev.dates);
+  if (prev && prev.accId && prev.accId !== T2.acctId && prev.file === T2.file.name
+    && typeof t1DelTxns === 'function') {
+    t1DelTxns(prev.accId, prev.dates, prev.file);
   }
   const map = T2.map;
+  // 余额列不能用 cellHasAmt 判（它把 0 当「不是钱」）：余额恰好为 0 是合法值，得存
+  const balOf = r => {
+    if (map.bal === undefined || !r.raw) return null;
+    const s = String(r.raw[map.bal] == null ? '' : r.raw[map.bal]).replace(/[,，\s¥￥]/g, '');
+    if (s === '' || s === '-' || s === '—' || isNaN(Number(s))) return null;
+    return Number(s);
+  };
   const recs = T2.result.ok.concat(T2.result.ex)
     .filter(r => r.date && r.amt > 0)   // 没日期/没金额的行（合计行、说明行）进不了按天分桶
-    .map(r => ({
-      date: r.date, memo: r.memo, dir: r.dir, amt: r.amt, opp: r.opp, ref: r.ref,
-      bal: (map.bal !== undefined && r.raw && cellHasAmt(r.raw[map.bal])) ? numOf(r.raw[map.bal]) : null,
-    }));
+    .map(r => ({ date: r.date, memo: r.memo, dir: r.dir, amt: r.amt, opp: r.opp, ref: r.ref, bal: balOf(r) }));
   if (!recs.length) return;
-  t1PutTxns(T2.acctId, T2.file.name, recs);
-  T2.txnPush = { accId: T2.acctId, dates: [...new Set(recs.map(r => r.date))] };
+  // 存失败（比如空间不足两次都没救回来）就不记账——否则之后换绑会按这份假账去删别人的数据
+  if (!t1PutTxns(T2.acctId, T2.file.name, recs)) return;
+  T2.txnPush = { accId: T2.acctId, dates: [...new Set(recs.map(r => r.date))], file: T2.file.name };
 }
 
 /* 上传后自动认账户的结果，连同余额有没有写进 T1，一并摊开说 */
@@ -1117,6 +1126,9 @@ async function loadFile(file) {
   try {
     toast('正在解析…');
     const rows = await XLSXLite.readTable(file);
+    // 换了新文件，上一批的回写记录就作废——否则「处理完账户 A 的文件、再传账户 B 的文件」
+    // 会被当成「写错了账户」，把 A 上那批正确的余额和明细误删掉
+    T2.balPush = null; T2.txnPush = null;
     T2.file = file; T2.rows = rows;
     T2.headRow = XLSXLite.findHeaderRow(rows, ALL_ALIAS);
     T2.map = autoMap(rows[T2.headRow] || [], rows.slice(T2.headRow + 1));
@@ -1207,7 +1219,7 @@ document.addEventListener('click', e => {
   if (!a) return;
   const act = a.dataset.act;
 
-  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {}, balPush: null, sniffNo: null, autoBind: null }); go('t2'); }
+  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {}, balPush: null, txnPush: null, sniffNo: null, autoBind: null }); go('t2'); }
   else if (act === 't2run') {
     T2.entId = ($('entSel2') || {}).value || T2.entId;
     const ei = ENTITIES.find(x => x.id === T2.entId);

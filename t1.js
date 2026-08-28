@@ -205,12 +205,18 @@ function t1LoadTxns() { try { return JSON.parse(localStorage.getItem(T1_TXN_KEY)
 function t1SaveTxns(t) {
   try { localStorage.setItem(T1_TXN_KEY, JSON.stringify(t)); return true; }
   catch (e) {
-    // 空间不够：全局掐掉最老的一半日期再试一次，再不行就放弃——余额不受影响
+    // 空间不够：全局掐掉最老的一半日期再试一次，再不行就放弃——余额不受影响。
+    // 掐掉了什么必须说出来，静默清数据会让用户以为明细一直都在
     const all = [];
     Object.keys(t).forEach(id => Object.keys(t[id]).forEach(d => all.push([id, d])));
     all.sort((x, y) => (x[1] < y[1] ? -1 : 1));
-    all.slice(0, Math.ceil(all.length / 2)).forEach(([id, d]) => { delete t[id][d]; });
-    try { localStorage.setItem(T1_TXN_KEY, JSON.stringify(t)); return true; }
+    const cut = all.slice(0, Math.ceil(all.length / 2));
+    cut.forEach(([id, d]) => { delete t[id][d]; });
+    try {
+      localStorage.setItem(T1_TXN_KEY, JSON.stringify(t));
+      toast(`流水明细空间不足，已清掉最旧的 ${cut.length} 天（余额不受影响）`, 4600);
+      return true;
+    }
     catch (e2) { toast('流水明细存不下了，本批未保存（余额不受影响）', 4200); return false; }
   }
 }
@@ -231,7 +237,8 @@ function t1PutTxns(accId, fileName, recs) {
   let n = 0;
   const at = new Date().toLocaleString('zh-CN');
   Object.keys(byDate).forEach(d => {
-    mine[d] = { file: String(fileName || ''), at, rows: byDate[d].slice(0, 800) };
+    // total 记原始笔数：超 800 截断时页面要如实标出来，不能让截过的「当日合计」冒充全量
+    mine[d] = { file: String(fileName || ''), at, total: byDate[d].length, rows: byDate[d].slice(0, 800) };
     n += mine[d].rows.length;
   });
   // 每个账户最多留 62 天（约两个月），从最老的掐——localStorage 就那么大
@@ -239,12 +246,18 @@ function t1PutTxns(accId, fileName, recs) {
   while (ds.length > 62) { delete mine[ds.shift()]; }
   return t1SaveTxns(all) ? n : 0;
 }
-/** T2 换绑账户时，把写错账户的那几天撤掉（和 t1ClearBalance 同一个纪律） */
-function t1DelTxns(accId, dates) {
+/** T2 换绑账户时，把写错账户的那几天撤掉（和 t1ClearBalance 同一个纪律）。
+    传了 expectFile 就只删「确实是那份文件写进来的」桶——桶已被别的批次覆盖时不动，防误删 */
+function t1DelTxns(accId, dates, expectFile) {
   if (!accId || !dates || !dates.length) return;
   const all = t1LoadTxns();
   if (!all[accId]) return;
-  dates.forEach(d => { delete all[accId][d]; });
+  dates.forEach(d => {
+    const b = all[accId][d];
+    if (!b) return;
+    if (expectFile !== undefined && b.file !== expectFile) return;
+    delete all[accId][d];
+  });
   if (!Object.keys(all[accId]).length) delete all[accId];
   t1SaveTxns(all);
 }
@@ -427,7 +440,7 @@ S['t1'] = () => {
 
   const fmtRate = r => r === null ? '<span class="mut">—</span>'
     : `<span class="${r >= 0 ? 'grn' : 'red'}">${r >= 0 ? '+' : ''}${r.toFixed(2)}%</span>`;
-  const fmtWarn = (r, warn) => r === null ? '<span class="mut" title="上一日合计为 0 或没有更早记录，算不出变动率">—</span>'
+  const fmtWarn = (r, warn) => r === null ? '<span class="mut" title="上一日合计不为正数或没有更早记录，算不出变动率">—</span>'
     : (warn ? pill('预警', 'cr') : pill('正常', 'ok'));
   const rows = ents.map(e => [
     `<b>${H(e.ent)}</b>`,
@@ -513,7 +526,7 @@ S['t1-ent'] = () => {
 
   // 论证：这条变动率是怎么算出来的、为什么报/不报警——结论要能自证
   const exp = e.rate === null
-    ? `<div class="note"><b>较上日变动率算不出来：</b>${prevD ? `上一日（${H(prevD)}）该主体合计为 0，分母不成立` : '没有更早的余额记录'}，所以不报预警。</div>`
+    ? `<div class="note"><b>较上日变动率算不出来：</b>${prevD ? `上一日（${H(prevD)}）该主体合计不是正数，分母不成立` : '没有更早的余额记录'}，所以不报预警。</div>`
     : `<div class="note ${e.rateWarn ? 'c' : 'g'}"><b>较上日变动率 ${e.rate >= 0 ? '+' : ''}${e.rate.toFixed(2)}% → ${e.rateWarn ? '预警' : '正常'}。</b>
        算法：（今日合计 ${money(e.bal)} − 上一日 ${H(prevD)} 合计 ${money(e.prev)}）÷ ${money(e.prev)}；预警阈值 ±${T1_CFG.rateTh}%。</div>`;
 
@@ -565,7 +578,8 @@ S['t1-txn'] = () => {
         r.ref ? `<span class="code">${H(r.ref)}</span>` : '<span class="mut">—</span>',
       ];
     });
-    return card(`${d} · ${b.rows.length} 笔 · 来自「${b.file || '导入'}」`, table(
+    const cut = b.total && b.total > b.rows.length;
+    return card(`${d} · ${b.rows.length} 笔${cut ? `（原 ${b.total} 笔，超上限已截断，当日合计只含留存部分）` : ''} · 来自「${b.file || '导入'}」`, table(
       [{ t: '摘要' }, { t: '对方户名' }, { t: '收入（元）', n: 1 }, { t: '支出（元）', n: 1 },
        { t: '当时余额（元）', n: 1 }, { t: '流水号' }], rows,
       ['<b>当日合计</b>', '',
@@ -831,7 +845,8 @@ document.addEventListener('click', e => {
     t1ImpApply();
   }
   else if (act === 'addAcc') {
-    const id = 'A' + String(T1_ACC.length + 1).padStart(3, '0');
+    // 不能用 length+1：删过账户会撞号，撞上的新账户会继承旧账户的历史余额和流水明细
+    const id = t1MkId(t1NextSeq());
     T1_ACC.push({ id, ent: '新主体', name: '新账户', type: 'bank', on: 1 });
     t1SaveAcc(T1_ACC); go('t1-acc');
   }

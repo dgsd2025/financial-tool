@@ -337,18 +337,21 @@ function runRules() {
       || (oc ? PROJECTS().find(p => p.code === oc) : null)
       || (T2.defProj ? PROJECTS().find(p => p.code === T2.defProj) : null);
     rec.rule = hit; rec.vmemo = hit.memo || memo; rec.hitField = hitField;
-    rec.proj = proj; rec.acct = fillAcct(hit.acct, proj);
+    rec.proj = proj;
     rec.tax = hit.tax || 0; rec.red = hit.red || 0;
     rec.warn = hit.warn || '';
     // 工资类按在编员工名单分流：名单内冲应付职工薪酬，名单外记管理费用_工资
+    let acctTpl = hit.acct;
     if (hit.byStaff && isStaff(opp)) {
-      rec.acct = fillAcct(RS.staffAcct, proj);
+      acctTpl = RS.staffAcct;
       rec.vmemo = '发放工资（冲应付职工薪酬）';
       rec.hitField = hitField + ' + 员工名单';
       rec.warn = '本行只冲应付职工薪酬（实发数）；社保个人部分与个税代扣由月末计提凭证处理';
     }
+    rec.acct = fillAcct(acctTpl, proj);
     // 科目需要项目但没识别出来 → 不硬填，进例外让人指定
-    if (String(hit.acct).includes('{p}') && !proj) {
+    // 注意查的是分流后真正要用的科目：221101 应付职工薪酬本就不带项目，不该因缺项目进例外
+    if (String(acctTpl).includes('{p}') && !proj) {
       rec.why = '命中规则「' + hit.memo + '」，但摘要里认不出是哪个项目';
       ex.push(rec); return;
     }

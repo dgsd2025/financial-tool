@@ -46,7 +46,7 @@ const toCSV = rows => rows.map(r => r.map(csvCell).join(',')).join('\n');
 const DOMS = [
   { id: 'home', n: '工作台', ic: '◆', ready: 1, items: [] },
   { id: 'tools', n: '工具箱', ic: '🧰', ready: 1, items: [
-      ['tool-list', '我的工具'], ['t2', 'T2 流水转凭证'], ['t3', 'T3 对账核对'], ['t4', 'T4 日损益'],
+      ['tool-list', '我的工具'], ['t1', 'T1 资金日报'], ['t2', 'T2 流水转凭证'], ['t3', 'T3 对账核对'], ['t4', 'T4 日损益'],
       ['tool-rules', '规则库'], ['tool-log', '处理记录'], ['tool-plan', '开发排期'] ] },
   { id: 'fund', n: '资金', ic: '◈', items: [['p-fund-daily', '资金日报'], ['p-fund-account', '账户与U盾'], ['p-fund-recon', '流水与对账'], ['p-pay', '付款申请']] },
   { id: 'inv', n: '票据', ic: '▼', items: [['p-inv-in', '进项票池'], ['p-inv-out', '销项开票']] },
@@ -243,13 +243,14 @@ function vouchers() {
 
 /* ============ 界面：工具箱 ============ */
 const TOOLS = [
+  { id: 'T1', n: '资金日报生成器', save: 20, ready: 1, go: 't1', own: '出纳',
+    d: '账户台账预置，每天只填变动的；三级汇总 + 覆盖倍数红线 + 一键生成钉钉日报文本' },
   { id: 'T2', n: '银行流水转凭证', save: 24, ready: 1, go: 't2', own: '出纳 · 总账',
     d: '网银导出的流水，自动归一化 + 规则匹配科目，生成可导入账务系统的凭证文件' },
   { id: 'T3', n: '对账单核对器', save: 22, ready: 1, go: 't3', own: '会计 · 通用',
     d: '我方台账与对方对账单逐笔勾对，三类差异；列对应可存模板，下月复用' },
   { id: 'T4', n: '日损益速算表', save: 35, ready: 1, go: 't4', own: '会计',
     d: '六渠道三层结构；取数天数不对齐时禁止出汇总，硬推口径显式标注' },
-  { id: 'T1', n: '资金日报生成器', save: 20, own: '出纳', d: '多主体余额汇总、覆盖倍数红线、一键生成日报' },
   { id: 'T5', n: '商品对码工具', save: 0, own: '会计', d: '销售端与采购端商品名归一化匹配，产出对码表' },
   { id: 'T8', n: '申报数据汇总表', save: 12, own: '税务会计', d: '多主体申报数据汇集与账表税比对' },
   { id: 'T6', n: '发票查重与打标', save: 7, own: '会计', d: '进项票查重、按合同号打标四级维度' },
@@ -570,7 +571,7 @@ function renderNav() {
     : `<button class="on">${d ? d.n : ''}</button>`;
 }
 function go(id) {
-  if (/^t[234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
+  if (/^t[1234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
   else {
     const d = DOMS.find(x => x.items.some(i => i[0] === id) || x.id === id);
     if (d) CURD = d.id;

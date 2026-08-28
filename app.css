@@ -206,3 +206,11 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:2px solid var(--
 .t4in{width:96px;min-width:76px;text-align:right;font-family:var(--f-mono);font-size:11.5px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)}
 .t4in:focus{border-color:var(--accent);outline:none}
 .t4in::placeholder{color:var(--text-3)}
+
+/* ===== T1 资金日报 ===== */
+.t1in{width:110px;text-align:right;font-family:var(--f-mono);font-size:11.5px;padding:3px 7px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)}
+.t1in.wide{width:130px;text-align:left;font-family:var(--f-body)}
+.t1in:focus{border-color:var(--accent);outline:none}
+.t1in::placeholder{color:var(--text-3)}
+.t1pre{font-family:var(--f-mono);font-size:12px;line-height:1.75;white-space:pre-wrap;word-break:break-word;margin:0;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:14px 16px;max-height:60vh;overflow:auto}
+input[type=date]{font-family:inherit;font-size:12px;padding:4px 7px;border:1px solid var(--border-2);border-radius:5px;background:var(--surface);color:var(--text)}

@@ -234,6 +234,7 @@ const T2 = {
   // acctNo = 从该账户带出来的账号文本，只用于凭证备注列和银行存款科目匹配
   ent: '', entId: '', line: '', acctId: '', acctNo: '', vchWord: '记', defProj: '',
   balPush: null,   // 余额回写结果，步骤 3 里摊开说
+  sniffNo: null, autoBind: null,   // 上传时从文件里嗅到的卡号 / 自动认账户的结果
   result: null, tab: 'ok'
 };
 
@@ -666,6 +667,45 @@ function t2AcctSelect() {
     + '<div class="mut" style="font-size:11px;margin-top:4px">来自 T1 账户台账。跑完流水，期末余额会回写到 T1 当日余额。</div>';
 }
 
+/* 从文件表头上方那几行里把卡号抠出来。
+   银行对账单表头之前一般有「卡号: 6215****1234」这类说明行，
+   有了它就能自动认出是哪个账户，用户上传完不用再手选。 */
+function t2SniffAcctNo(rows, headRow) {
+  const re = /(?:卡号|账号|帐号|账户号|户号)\s*[:：]?\s*([0-9][0-9*＊\-\s]{5,})/;
+  const scan = rows.slice(0, Math.min(headRow + 1, 12));
+  for (const r of scan) {
+    for (const c of r) {
+      const m = re.exec(String(c == null ? '' : c));
+      if (m) {
+        const no = m[1].trim();
+        if (no.replace(/[^0-9]/g, '').length >= 4) return no;
+      }
+    }
+  }
+  return null;
+}
+
+/* 上传文件后自动认账户：靠文件里的卡号去 T1 台账匹配。
+   认出来就顺带把主体也定了，并立刻回写余额——不用等用户走完匹配规则那一步。 */
+function t2AutoBind() {
+  T2.sniffNo = null; T2.autoBind = null;
+  if (!T2.rows || typeof t1FindAccByNo !== 'function') return;
+  const no = t2SniffAcctNo(T2.rows, T2.headRow);
+  if (!no) return;
+  T2.sniffNo = no;
+  const acc = t1FindAccByNo(no);
+  if (!acc) { T2.autoBind = { miss: 1 }; return; }
+  const ent = ENTITIES.find(e => e.short === acc.ent);
+  if (ent) {
+    T2.entId = ent.id; T2.ent = ent.full;
+    useRuleSet(T2.entId); T2.defProj = defaultProjOf();
+    if (!T2.line && ent.line) T2.line = ent.line;
+  }
+  t2SetAcct(acc.id);
+  T2.autoBind = { accId: acc.id, ent: acc.ent, name: acc.name, no: acc.no };
+  t2PushBalance();   // 认出账户就直接把期末余额写进 T1，上传完 T1 里就能看到
+}
+
 /* 从流水里取期末余额。
    坑：网银导出有正序也有倒序的，同一天多笔时「最后一笔」在文件里可能是第一行。
    所以先比首末两行判断排序方向，再决定同日取哪一行，不能闭眼取最后一行。 */
@@ -686,6 +726,12 @@ function t2ClosingBal() {
 /* 把期末余额回写到 T1 的当日余额。
    那天已有手工录的数且对不上时先问，不静默覆盖。 */
 function t2PushBalance() {
+  // 上一次是写到别的账户上的（用户在下拉里改了账户）→ 把那笔撤掉再写新的，
+  // 否则旧账户会凭空多出一笔它从没有过的余额
+  const prev = T2.balPush;
+  if (prev && prev.ok && prev.accId && prev.accId !== T2.acctId && typeof t1ClearBalance === 'function') {
+    t1ClearBalance(prev.accId, prev.date, 'T2', prev.val);
+  }
   T2.balPush = null;
   if (typeof t1PutBalance !== 'function' || !T2.acctId) return;
   const cb = t2ClosingBal();
@@ -697,10 +743,28 @@ function t2PushBalance() {
       `${cb.date} 这天 T1 里已经有余额 ${money(r.old)}，\n`
       + `流水算出来的期末余额是 ${money(cb.val)}，差 ${(diff >= 0 ? '+' : '') + money(diff)}。\n\n`
       + `用流水的数覆盖吗？\n取消 = 保留原来手工录的数。`);
-    if (!ok) { T2.balPush = { kept: 1, date: cb.date, val: cb.val, old: r.old }; return; }
+    if (!ok) { T2.balPush = { kept: 1, accId: T2.acctId, date: cb.date, val: cb.val, old: r.old }; return; }
     r = t1PutBalance(T2.acctId, cb.date, cb.val, 'T2', 1);
   }
-  T2.balPush = r.ok ? { ok: 1, date: cb.date, val: cb.val } : { err: r.reason };
+  T2.balPush = r.ok ? { ok: 1, accId: T2.acctId, date: cb.date, val: cb.val } : { err: r.reason };
+}
+
+/* 上传后自动认账户的结果，连同余额有没有写进 T1，一并摊开说 */
+function t2AutoBindNote() {
+  const ab = T2.autoBind;
+  if (!ab) return T2.sniffNo ? '' : '';
+  if (ab.miss) {
+    return `<div class="note w"><b>文件里的卡号是 ${H(T2.sniffNo)}，但 T1 台账里没有账号对得上的账户。</b>
+      下面手动选一下是哪个账户${T2.acctId ? `，然后 <button class="btn sm" data-act="t2bindNo">把这个卡号记到该账户</button>，下次上传就自动认出来了` : '——选完可以把卡号记进台账，下次就自动了'}。</div>`;
+  }
+  const p = T2.balPush;
+  const bal = !p ? ''
+    : p.ok ? `期末余额 ${money(p.val)}（${p.date}）<b>已写入 T1</b>。`
+    : p.kept ? `期末余额 ${money(p.val)} 和 T1 里已有的 ${money(p.old)} 对不上，你选了保留原值。`
+    : p.skip ? '这份文件没有余额列，T1 余额没动。'
+    : '';
+  return `<div class="note g"><b>已按文件里的卡号 ${H(T2.sniffNo)} 认出账户：${H(ab.ent)} · ${H(ab.name)}。</b>
+    主体也一并定了。${bal} 认错了在下面改，改完余额会重新写。</div>`;
 }
 
 function t2Step2() {
@@ -735,6 +799,7 @@ function t2Step2() {
       这份文件里它们的列名一样（分不出谁是谁），所以改用余额的变动方向判断：
       余额变大的那笔钱在第 ${T2.map._dcGuess[0] + 1} 列 → 当成<b>收入</b>，第 ${T2.map._dcGuess[1] + 1} 列 → 当成<b>支出</b>。
       推断错了直接在上面改。</div>` : ''}
+    ${t2AutoBindNote()}
     ${cardp('这批流水属于', `
       <div class="cols c2">
         <div><div class="field"><label class="fl">主体 <span class="red">*</span></label>
@@ -944,10 +1009,15 @@ async function loadFile(file) {
     T2.file = file; T2.rows = rows;
     T2.headRow = XLSXLite.findHeaderRow(rows, ALL_ALIAS);
     T2.map = autoMap(rows[T2.headRow] || [], rows.slice(T2.headRow + 1));
+    t2AutoBind();          // 认出账户就当场把余额写进 T1，上传完 T1 里立刻能看到
     T2.step = 2;
     go('t2');
     const got = Object.keys(T2.map).length;
-    toast(`读到 ${rows.length} 行，自动识别 ${got} 个字段`);
+    const ab = T2.autoBind;
+    toast(ab && ab.accId
+      ? `读到 ${rows.length} 行 · 已认出账户「${ab.ent} · ${ab.name}」`
+      + (T2.balPush && T2.balPush.ok ? `，余额已写入 T1` : '')
+      : `读到 ${rows.length} 行，自动识别 ${got} 个字段`, 4200);
   } catch (e) {
     toast('读取失败：' + e.message, 4200);
   }
@@ -979,7 +1049,11 @@ function bindDynamic() {
   });
   // 收付账户：选的是 T1 账户 id，账号文本从台账带出来，不让用户重复手填
   const accSel = $('acctSel');
-  if (accSel) accSel.onchange = () => { t2SetAcct(accSel.value); go('t2'); };
+  if (accSel) accSel.onchange = () => {
+    t2SetAcct(accSel.value);
+    if (T2.acctId) t2PushBalance();   // 换了账户，余额得写到新账户上
+    go('t2');
+  };
   ['entSel2:ent', 'lineSel:line', 'vchWord:vchWord', 'defProj:defProj'].forEach(p => {
     const [id, key] = p.split(':');
     const el = $(id);
@@ -990,6 +1064,7 @@ function bindDynamic() {
         T2.ent = ei ? ei.full : '';
         useRuleSet(T2.entId); T2.defProj = defaultProjOf();
         t2SetAcct('');   // 账户按主体分，换主体原来选的账户就不成立了
+        T2.balPush = null; T2.autoBind = null;
         go('t2');
       } else T2[key] = el.value;
     };
@@ -1021,7 +1096,7 @@ document.addEventListener('click', e => {
   if (!a) return;
   const act = a.dataset.act;
 
-  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {}, balPush: null }); go('t2'); }
+  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {}, balPush: null, sniffNo: null, autoBind: null }); go('t2'); }
   else if (act === 't2run') {
     T2.entId = ($('entSel2') || {}).value || T2.entId;
     const ei = ENTITIES.find(x => x.id === T2.entId);
@@ -1073,6 +1148,15 @@ document.addEventListener('click', e => {
     if (added) saveRules(T2.entId, RULES);
     toast(`已处理 ${fixed} 笔${added ? `，新增 ${added} 条规则` : ''}`);
     T2.step = 5; go('t2');
+  }
+  else if (act === 't2bindNo') {
+    if (!T2.acctId || !T2.sniffNo) { toast('先选一个账户'); return; }
+    if (typeof t1BindAcctNo === 'function' && t1BindAcctNo(T2.acctId, T2.sniffNo)) {
+      t2SetAcct(T2.acctId);
+      T2.autoBind = { accId: T2.acctId, ent: (t1AccById(T2.acctId) || {}).ent, name: (t1AccById(T2.acctId) || {}).name, no: T2.sniffNo };
+      t2PushBalance();
+      toast('卡号已记进 T1 台账，下次上传自动认出来', 4200); go('t2');
+    } else toast('没能写进台账');
   }
   else if (act === 't2export') { T2.step = 5; go('t2'); }
   else if (act === 'dlVoucher') {

@@ -116,6 +116,27 @@ function t1Accounts(ent) {
 /** 按 id 取账户 */
 const t1AccById = id => T1_ACC.find(a => a.id === id) || null;
 
+/* 账号比对要容忍打码：对账单里常是 6215****1234，台账里可能存的是完整卡号。
+   去掉分隔符和星号后，先试全等，再试「前 4 位 + 后 4 位都一样」。 */
+const t1NoKey = s => String(s == null ? '' : s).replace(/[\s　\-*＊·]/g, '');
+function t1NoMatch(a, b) {
+  const x = t1NoKey(a), y = t1NoKey(b);
+  if (x.length < 6 || y.length < 6) return false;
+  if (x === y) return true;
+  return x.slice(0, 4) === y.slice(0, 4) && x.slice(-4) === y.slice(-4);
+}
+/** 按账号找在管账户（T2 上传文件后靠这个自动认账户） */
+function t1FindAccByNo(no) {
+  if (!no) return null;
+  return T1_ACC.find(a => a.on && a.no && t1NoMatch(a.no, no)) || null;
+}
+/** 把账号写进某个账户（T2 认不出账户时，用户当场绑定，下次就自动了） */
+function t1BindAcctNo(accId, no) {
+  const a = t1AccById(accId);
+  if (!a || !no) return false;
+  a.no = String(no).trim(); t1SaveAcc(T1_ACC); return true;
+}
+
 /* 余额来源留痕：哪些余额是 T2 流水带进来的，T1 界面上要标出来，
    否则用户分不清哪个数是自己抄的、哪个是机器填的。 */
 const T1_SRC_KEY = 'fsc_t1_balsrc_v1';
@@ -147,6 +168,28 @@ function t1PutBalance(accId, date, val, from, force) {
 }
 /** 该余额是不是 T2 带进来的 */
 const t1BalFrom = (date, accId) => (t1LoadSrc()[date] || {})[accId] || '';
+
+/**
+ * 撤回一条自动写入的余额。
+ * 用在 T2 里改了账户的时候：余额要搬到新账户，旧账户上那笔是写错的，得撤掉，
+ * 否则那个账户会凭空多出一笔它从没有过的余额。
+ * 只撤「来源是自动写入、且值没被人手改过」的，人工调过的一律不动。
+ */
+function t1ClearBalance(accId, date, from, expectVal) {
+  if (!accId || !date) return false;
+  if (t1BalFrom(date, accId) !== from) return false;
+  const day = t1LoadDay();
+  const d = day[date];
+  if (!d || d[accId] === undefined) return false;
+  if (expectVal !== undefined && Math.abs(d[accId] - expectVal) > 0.005) return false;
+  delete d[accId];
+  if (!Object.keys(d).length) delete day[date];
+  t1SaveDay(day);
+  const src = t1LoadSrc();
+  if (src[date]) { delete src[date][accId]; if (!Object.keys(src[date]).length) delete src[date]; }
+  t1SaveSrc(src);
+  return true;
+}
 
 /* ============ 台账导入 ============ */
 /* 一个入口两件事：导账户台账；表里带余额列就顺手把余额也导了。
@@ -383,7 +426,7 @@ S['t1-entry'] = () => {
       const hint = e.v === null ? '<span class="red">从未录入</span>'
         : (cur !== undefined
           ? (src ? pill('来自 ' + src + ' 流水', 'ok') : pill('今日已填', 'ok'))
-          : `<span class="mut">上次 ${H(e.from)}：${money(e.v)}</span>`);
+          : `<span class="mut">上次 ${H(e.from)}${t1BalFrom(e.from, a.id) ? '（' + H(t1BalFrom(e.from, a.id)) + '）' : ''}：${money(e.v)}</span>`);
       return [
         `${a.type === 'plat' ? '▣' : '▤'} ${H(a.name)}`
         + (a.no ? `<div class="mut" style="font-size:11px">${H(a.no)}</div>` : ''),

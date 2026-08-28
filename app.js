@@ -59,55 +59,146 @@ const DOMS = [
 ];
 
 /* ============ 主数据 ============ */
-const ENTITIES = ['澳乐', '东蓓', '优栖', '瑞眠', '牧童', '新艺文化', '数智云仓', '云帕', '云迪', '云基', '云湃', '集包厂', '昌记云泰'];
+/* 主体：规则库按主体隔离。不同主体业务完全不同，共用一套规则必然记错账。 */
+const ENTITIES = [
+  { id: 'youqi', short: '优栖', full: '优栖（广州）服务管理有限公司', line: '出租屋' },
+  { id: 'aole',  short: '澳乐', full: '澳乐', line: '电商' },
+  { id: 'dongbei', short: '东蓓', full: '东蓓', line: '电商' },
+  { id: 'ruimian', short: '瑞眠', full: '瑞眠', line: '电商' },
+  { id: 'mutong', short: '牧童', full: '牧童', line: '电商' },
+  { id: 'xinyi', short: '新艺文化', full: '新艺文化', line: '电商' },
+  { id: 'szyc', short: '数智云仓', full: '数智云仓', line: '物业收租' },
+  { id: 'yunpa', short: '云帕', full: '云帕', line: '物业收租' },
+  { id: 'yundi', short: '云迪', full: '云迪', line: '物业收租' },
+  { id: 'yunji', short: '云基', full: '云基', line: '物业收租' },
+  { id: 'yunpai', short: '云湃', full: '云湃', line: '物业收租' },
+  { id: 'jibao', short: '集包厂', full: '集包厂', line: '集包' },
+  { id: 'cjyt', short: '昌记云泰', full: '昌记云泰', line: '物业收租' },
+];
 const LINES = ['电商', '集包', '物业收租', '手机租赁', '出租屋', '设备租赁', '塑料制造'];
 
-/* 科目表（可扩展） */
-const ACCOUNTS = [
-  ['1002', '银行存款'],
-  ['1122', '应收账款'], ['1221', '其他应收款'], ['1221.01', '其他应收款-内部往来'],
-  ['2202', '应付账款'], ['2241', '其他应付款'], ['2211', '应付职工薪酬'], ['2211.02', '应付职工薪酬-社保公积金'],
-  ['2221', '应交税费'], ['2203', '预收账款'], ['1123', '预付账款'],
-  ['6001', '主营业务收入'], ['6051', '其他业务收入'],
-  ['6401', '主营业务成本'],
-  ['6601', '销售费用'], ['6601.01', '销售费用-推广费'], ['6601.02', '销售费用-运输费'],
-  ['6602', '管理费用'], ['6602.01', '管理费用-办公费'], ['6602.02', '管理费用-水电费'], ['6602.03', '管理费用-租赁费'],
-  ['6603', '财务费用'], ['6603.01', '财务费用-手续费'], ['6603.02', '财务费用-利息'],
-];
-const acctName = code => (ACCOUNTS.find(a => a[0] === code) || [, ''])[1];
+/* ============ 规则集（按主体） ============ */
+/* 优栖 —— 取自 2026年第8期真实凭证。二房东模式：
+   从业主手里租房付租金（成本），转租给租客收租金（收入）。
+   科目带项目后缀：{p} → 1001 花都UU公寓 / 2001 冼村复建房六期 */
+const RS_YOUQI = {
+  projects: [
+    { code: '2001', name: '冼村复建房六期', kw: '冼村|洗村|复建房' },
+    { code: '1001', name: '花都UU公寓', kw: '花都|UU公寓' },
+  ],
+  accounts: [
+    ['100201', '银行存款_张华工行7239'],
+    ['100202', '银行存款_张华工行9999'],
+    ['100203', '银行存款_优栖工行6418'],
+    ['1122_{p}', '应收账款'],
+    ['122104', '其他应收款_社保个人部分'],
+    ['221101', '应付职工薪酬_工资'],
+    ['222112', '应交税费_应交个人所得税'],
+    ['22210107', '应交税费_应交增值税_销项税额'],
+    ['224101_{p}', '其他应付款_押金'],
+    ['5001_{p}', '主营业务收入'],
+    ['5402_{p}', '其他业务成本'],
+    ['560202_{p}', '管理费用_房租'],
+    ['560204_{p}', '管理费用_水电费'],
+    ['560206_{p}', '管理费用_清洁费'],
+    ['560209_{p}', '管理费用_工资'],
+    ['560223_{p}', '管理费用_服务费'],
+    ['560303_{p}', '财务费用_手续费'],
+  ],
+  /* 业主名单：付业主租金的摘要常是「跨行汇款」「网转」，没有业务含义，只能靠户名认 */
+  owners: {
+    '2001': ['黄巧嫦','李彩屏','潘燕波','卢国秋','冼国锋','康智敏','卢佑江','谢薇','梁翠红',
+             '冼东君','卢国湛','冼世竣','冼艳桃','冼树六','骆维','徐淑荣','梁小冬','黄凤香',
+             '卢尤添','冼章荣','卢志方','潘妙春','卢尤满'],
+  },
+  ownerAcct: '5402_{p}',
+  ownerMemo: '付业主租金',
+  rules: [
+    // 顺序要紧：命中第一条即停，越具体的越靠前
+    { kw: '复建房|冼村|洗村', dir: 'out', acct: '5402_{p}', memo: '付业主租金' },
+    // 收款：平台提现是冲应收，不是确认收入，必须排在收租金前面
+    { kw: '寓小二|提现', dir: 'in', acct: '1122_{p}', memo: '平台提现冲应收',
+      note: '租金在挂应收时已确认收入，提现只是收款' },
+    { kw: '房租', dir: 'in', acct: '1122_{p}', memo: '收租金冲应收' },
+    { kw: '收.*租金|租金.*收', dir: 'in', acct: '5001_{p}', memo: '收租金', tax: 0.01,
+      note: '银行直收、未先挂应收的，确认收入并拆销项税' },
+    // 水电费收入：借银行存款，贷主营业务收入，贷销项税（贵司口径）
+    { kw: '水费|电费|水电|代收电费|代收水费', dir: 'in', acct: '5001_{p}', memo: '收水电费', tax: 0.01,
+      note: '按贵司分录：借银行存款 / 贷主营业务收入 + 贷销项税额' },
+    // 押金
+    { kw: '收.*押金|收到.*押金|押金', dir: 'in', acct: '224101_{p}', memo: '收押金',
+      warn: '押金是负债不是收入' },
+    { kw: '退押金', dir: 'out', acct: '5001_{p}', memo: '退押金', red: 1,
+      warn: '按贵司做法用红字冲收入' },
+    // 付房东与运营
+    { kw: '房租.*电费|电费.*房租', dir: 'out', acct: '560202_{p}', memo: '付房东房租',
+      warn: '这类通常要拆房租与水电两行，请复核' },
+    { kw: '水费|电费|水电', dir: 'out', acct: '560204_{p}', memo: '付水电费' },
+    { kw: '清洁|保洁|劳务费', dir: 'out', acct: '560206_{p}', memo: '付清洁费' },
+    { kw: '工资|薪酬|薪金', dir: 'out', acct: '560209_{p}', memo: '发放工资',
+      warn: '若为公司在编员工应走 221101 应付职工薪酬，请确认' },
+    { kw: '财务.*费用|服务费|代理费', dir: 'out', acct: '560223_{p}', memo: '付服务费' },
+    { kw: '手续费|工本费|短信费|账户管理费', dir: 'out', acct: '560303_{p}', memo: '银行手续费' },
+  ],
+};
+/* 其余主体尚无规则集——它们业务不同（电商、集包、塑料制造），
+   规则要各自从真账里学，不能套用优栖这套。 */
+const RULE_SETS = { youqi: RS_YOUQI };
 
-/* ============ 规则库 ============ */
-const RULE_KEY = 'fsc_t2_rules_v1';
+/* 当前生效的规则集（随 T2 选的主体切换） */
+let RS = null;
+function useRuleSet(entId) {
+  RS = RULE_SETS[entId] || null;
+  RULES = RS ? loadRules(entId) : [];
+  return RS;
+}
+const PROJECTS = () => (RS ? RS.projects : []);
+const ACCOUNTS = () => (RS ? RS.accounts : []);
+
+function detectProj(text) {
+  const s = String(text || '');
+  for (const p of PROJECTS()) if (new RegExp(p.kw).test(s)) return p;
+  return null;
+}
+const fillAcct = (code, proj) => String(code).replace('{p}', proj ? proj.code : '____');
+const acctName = code => {
+  const list = ACCOUNTS();
+  const hit = list.find(a => a[0] === code);
+  if (hit) return hit[1];
+  const tpl = list.find(a => a[0].includes('{p}') &&
+    new RegExp('^' + a[0].replace('{p}', '\\d+') + '$').test(code));
+  return tpl ? tpl[1] : '';
+};
+/** 对方户名是否业主；是则返回项目代码 */
+function ownerProj(opp) {
+  if (!RS || !RS.owners) return null;
+  const s = String(opp || '').trim();
+  if (!s) return null;
+  for (const code of Object.keys(RS.owners)) {
+    if (RS.owners[code].some(n => s === n || s.includes(n))) return code;
+  }
+  return null;
+}
+
+/* ============ 规则库（按主体分开存） ============ */
+const RULE_KEY = e => 'fsc_t2_rules_' + e + '_v2';
 const LOG_KEY = 'fsc_t2_log_v1';
 
-const PRESET_RULES = [
-  { kw: '手续费|服务费|账户管理费|工本费|短信费', dir: 'out', acct: '6603.01', memo: '银行手续费' },
-  { kw: '利息|结息|计息', dir: 'in', acct: '6603.02', memo: '利息收入' },
-  { kw: '代发工资|工资|薪金|劳务费发放', dir: 'out', acct: '2211', memo: '发放工资' },
-  { kw: '社保|医保|公积金|养老保险', dir: 'out', acct: '2211.02', memo: '缴纳社保公积金' },
-  { kw: '税|扣税|税收缴款|增值税|所得税', dir: 'out', acct: '2221', memo: '缴纳税费' },
-  { kw: '货款|采购|付供应商|材料款', dir: 'out', acct: '2202', memo: '支付货款' },
-  { kw: '物流|快递|运费|运输', dir: 'out', acct: '6601.02', memo: '支付物流费' },
-  { kw: '推广|广告|投流|营销', dir: 'out', acct: '6601.01', memo: '支付推广费' },
-  { kw: '房租|租金|物业费', dir: 'out', acct: '6602.03', memo: '支付租金' },
-  { kw: '电费|水费|水电', dir: 'out', acct: '6602.02', memo: '支付水电费' },
-  { kw: '报销|备用金', dir: 'out', acct: '6602', memo: '费用报销' },
-  { kw: '内部|调拨|往来|借支', dir: 'any', acct: '1221.01', memo: '主体间往来', warn: '主体间调拨须走专用审批流' },
-  { kw: '货款|销售|回款|收款|结算', dir: 'in', acct: '1122', memo: '收回货款' },
-  { kw: '租金|房租', dir: 'in', acct: '6051', memo: '收取租金' },
-  { kw: '退款|退货|退回', dir: 'in', acct: '1122', memo: '退款退回' },
-];
-
-function loadRules() {
+function loadRules(entId) {
   try {
-    const s = localStorage.getItem(RULE_KEY);
+    const s = localStorage.getItem(RULE_KEY(entId));
     if (s) return JSON.parse(s);
   } catch (e) { /* 忽略 */ }
-  const init = PRESET_RULES.map(r => Object.assign({ id: uid(), hits: 0, src: '预置' }, r));
-  saveRules(init); return init;
+  const set = RULE_SETS[entId];
+  if (!set) return [];
+  const init = set.rules.map(r => Object.assign({ id: uid(), hits: 0, src: '预置' }, r));
+  saveRules(entId, init); return init;
 }
-function saveRules(r) { try { localStorage.setItem(RULE_KEY, JSON.stringify(r)); } catch (e) { toast('规则保存失败：浏览器存储空间不足'); } }
-let RULES = loadRules();
+function saveRules(entId, r) {
+  try { localStorage.setItem(RULE_KEY(entId), JSON.stringify(r)); }
+  catch (e) { toast('规则保存失败：浏览器存储空间不足'); }
+}
+let RULES = [];
 
 function loadLog() { try { return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); } catch (e) { return []; } }
 function saveLog(l) { try { localStorage.setItem(LOG_KEY, JSON.stringify(l.slice(0, 200))); } catch (e) { /* 忽略 */ } }
@@ -116,7 +207,7 @@ function addLog(entry) { const l = loadLog(); l.unshift(entry); saveLog(l); }
 /* ============ T2 状态 ============ */
 const T2 = {
   step: 1, rows: null, headRow: 0, map: {}, file: null,
-  ent: '', line: '', acctNo: '', vchWord: '银',
+  ent: '', entId: '', line: '', acctNo: '', vchWord: '记', defProj: '',
   result: null, tab: 'ok'
 };
 
@@ -203,6 +294,17 @@ function runRules() {
     // 匹配范围：默认只看摘要。对方户名容易误命中（如「交通运输部」含「运输」），
     // 必须由规则显式声明 scope:'both' 才纳入。
     let hitField = '';
+    // 对方户名在业主名单里 + 付款方向 → 直接判定为付业主租金，
+    // 不依赖摘要（银行流水里这类摘要是「跨行汇款」「网转」，没有业务含义）
+    const ownerCode = ownerProj(opp);
+    if (ownerCode && dir === 'out') {
+      const pj = PROJECTS().find(p => p.code === ownerCode);
+      rec.rule = { id: 'owner', kw: '业主名单', memo: '付业主租金' };
+      rec.hitField = '业主名单'; rec.proj = pj;
+      rec.acct = fillAcct(RS.ownerAcct, pj); rec.vmemo = RS.ownerMemo;
+      rec.tax = 0; rec.red = 0; rec.warn = '';
+      ok.push(rec); return;
+    }
     const hit = RULES.find(rule => {
       if (rule.dir !== 'any' && rule.dir !== dir) return false;
       const re = new RegExp(rule.kw);
@@ -211,32 +313,61 @@ function runRules() {
       return false;
     });
     if (!hit) { rec.why = '摘要未命中任何规则'; ex.push(rec); return; }
-    rec.rule = hit; rec.acct = hit.acct; rec.vmemo = hit.memo || memo; rec.hitField = hitField;
+    // 项目识别：摘要 → 对方户名 → 业主名单 → 用户设的默认项目
+    const oc = ownerProj(opp);
+    const proj = detectProj(memo) || detectProj(opp)
+      || (oc ? PROJECTS().find(p => p.code === oc) : null)
+      || (T2.defProj ? PROJECTS().find(p => p.code === T2.defProj) : null);
+    rec.rule = hit; rec.vmemo = hit.memo || memo; rec.hitField = hitField;
+    rec.proj = proj; rec.acct = fillAcct(hit.acct, proj);
+    rec.tax = hit.tax || 0; rec.red = hit.red || 0;
     rec.warn = hit.warn || '';
+    // 科目需要项目但没识别出来 → 不硬填，进例外让人指定
+    if (String(hit.acct).includes('{p}') && !proj) {
+      rec.why = '命中规则「' + hit.memo + '」，但摘要里认不出是哪个项目';
+      ex.push(rec); return;
+    }
     ok.push(rec);
   });
   T2.result = { ok, ex, total: body.length };
   // 命中计数
   ok.forEach(r => { const t = RULES.find(x => x.id === r.rule.id); if (t) t.hits = (t.hits || 0) + 1; });
-  saveRules(RULES);
+  saveRules(T2.entId, RULES);
 }
 
 /* 生成凭证行 */
 function vouchers() {
   const { ok } = T2.result;
   const out = [];
+  const bankAcct = () => {
+    const hit = ACCOUNTS().find(a => T2.acctNo && a[1].includes(T2.acctNo));
+    return hit || ['100203', '银行存款_优栖工行6418'];
+  };
   ok.forEach((r, i) => {
     const no = String(i + 1).padStart(4, '0');
-    const bank = ['1002', '银行存款'];
+    const bank = bankAcct();
     const other = [r.acct, acctName(r.acct)];
-    const pair = r.dir === 'in'
-      ? [[bank, r.amt, 0], [other, 0, r.amt]]
-      : [[other, r.amt, 0], [bank, 0, r.amt]];
-    pair.forEach(([a, d, c]) => {
-      out.push([r.date, T2.vchWord, no, r.vmemo, a[0], a[1],
-        d ? d.toFixed(2) : '', c ? c.toFixed(2) : '',
-        T2.ent, T2.line, '', '', r.opp, r.ref, T2.acctNo]);
-    });
+    const push = (a, d, c) => out.push([
+      r.date, T2.vchWord, no, r.vmemo, a[0], a[1],
+      d ? d.toFixed(2) : '', c ? c.toFixed(2) : '',
+      T2.ent, T2.line, r.proj ? r.proj.name : '', '', r.opp, r.ref, T2.acctNo,
+    ]);
+    if (r.dir === 'in' && r.tax) {
+      // 含税收入：拆主营业务收入 + 销项税额（按征收率）
+      const net = +(r.amt / (1 + r.tax)).toFixed(2);
+      const vat = +(r.amt - net).toFixed(2);
+      push(bank, r.amt, 0);
+      push(other, 0, net);
+      push(['22210107', '应交税费_应交增值税_销项税额'], 0, vat);
+    } else if (r.red) {
+      // 红字冲销：两行都在贷方，冲减方为负数（贵司退押金的做法）
+      push(other, 0, -r.amt);
+      push(bank, 0, r.amt);
+    } else if (r.dir === 'in') {
+      push(bank, r.amt, 0); push(other, 0, r.amt);
+    } else {
+      push(other, r.amt, 0); push(bank, 0, r.amt);
+    }
   });
   return out;
 }
@@ -303,6 +434,17 @@ S['tool-plan'] = () => head('开发排期', '十个工具分三批。当前处�
 
 /* 规则库界面 */
 S['tool-rules'] = () => {
+  if (!RS) {
+    const withRules = ENTITIES.filter(e => RULE_SETS[e.id]);
+    return head('规则库', '规则库<b>按主体隔离</b>——不同主体业务不同，共用一套规则必然记错账。', '工具箱 · T2')
+      + `<div class="note"><b>请先选主体。</b>下面是已有规则库的主体，点进去查看；其余主体的规则要各自从真账里学。</div>`
+      + `<div class="tgrid">${withRules.map(e => `<button class="tcard" data-useent="${e.id}">
+          <span class="tc-h"><span class="tc-n">${H(e.full)}</span><span class="tc-sp"></span>
+          <span class="tc-sv">${RULE_SETS[e.id].rules.length}<small> 条</small></span></span>
+          <span class="tc-d">${H(e.line)} · ${RULE_SETS[e.id].projects.length} 个项目</span></button>`).join('')}</div>`
+      + `<div class="note w"><b>其余 ${ENTITIES.length - withRules.length} 个主体暂无规则库。</b>
+         电商、集包、塑料制造的业务与出租屋完全不同，规则不能套用——需要各自提供一期真实凭证来学。</div>`;
+  }
   const rows = RULES.map(r => [
     `<span class="code">${H(r.kw.length > 26 ? r.kw.slice(0, 26) + '…' : r.kw)}</span>`,
     r.dir === 'in' ? pill('收入', 'ok') : r.dir === 'out' ? pill('支出', 'wa') : pill('不限', 'mu'),
@@ -312,7 +454,9 @@ S['tool-rules'] = () => {
     H(r.src || '自建'),
     `<button class="btn sm" data-delrule="${r.id}">删除</button>`
   ]);
-  return head('规则库', '摘要关键词 → 会计科目。每处理一次例外就可以存成规则，规则库越养越准。', '工具箱 · T2',
+  const curEnt = ENTITIES.find(e => e.id === T2.entId);
+  return head('规则库 · ' + (curEnt ? curEnt.full : ''),
+    '摘要关键词 → 会计科目。每处理一次例外就可以存成规则，规则库越养越准。<b>规则按主体隔离</b>。', '工具箱 · T2',
     `<button class="btn" data-act="exportRules">导出规则</button><button class="btn pri" data-act="addRule">+ 新增规则</button>`)
     + kpis([
       { k: '规则总数', v: String(RULES.length), u: '条' },
@@ -408,9 +552,11 @@ function t2Step2() {
     ${cardp('这批流水属于', `
       <div class="cols c2">
         <div><div class="field"><label class="fl">主体 <span class="red">*</span></label>
-          <select id="entSel2"><option value="">— 请选择 —</option>${ENTITIES.map(e => `<option ${T2.ent === e ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
+          <select id="entSel2"><option value="">— 请选择 —</option>${ENTITIES.map(e => `<option value="${e.id}" ${T2.entId === e.id ? 'selected' : ''}>${e.full}${RULE_SETS[e.id] ? '' : '（无规则库）'}</option>`).join('')}</select></div>
           <div class="field"><label class="fl">业务线</label>
-          <select id="lineSel"><option value="">— 不指定 —</option>${LINES.map(e => `<option ${T2.line === e ? 'selected' : ''}>${e}</option>`).join('')}</select></div></div>
+          <select id="lineSel"><option value="">— 不指定 —</option>${LINES.map(e => `<option ${T2.line === e ? 'selected' : ''}>${e}</option>`).join('')}</select></div>
+          <div class="field"><label class="fl">默认项目（摘要与户名都认不出时用）</label>
+          <select id="defProj"><option value="">— 不设，认不出就进例外 —</option>${PROJECTS().map(p => `<option value="${p.code}" ${T2.defProj === p.code ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div></div>
         <div><div class="field"><label class="fl">银行账号（备注用）</label><input type="text" id="acctNo" value="${H(T2.acctNo)}" placeholder="如 6222...1234"></div>
           <div class="field"><label class="fl">凭证字</label><input type="text" id="vchWord" value="${H(T2.vchWord)}"></div></div>
       </div>`)}
@@ -468,12 +614,16 @@ function exTable(ex) {
 
 function t2Step4() {
   const ex = T2.result.ex;
-  const acctOpts = ACCOUNTS.map(a => `<option value="${a[0]}">${a[0]} ${a[1]}</option>`).join('');
+  const acctOpts = ACCOUNTS().map(a => `<option value="${a[0]}">${a[0]} ${a[1]}</option>`).join('');
   const rows = ex.map((r, i) => [
     r.no, r.date || '<span class="red">缺失</span>', H(r.memo.slice(0, 28)), H(r.opp.slice(0, 14)),
     r.dir === 'in' ? pill('收', 'ok') : pill('付', 'wa'), money(r.amt),
     `<select data-fix="${i}"><option value="">— 跳过 —</option>${acctOpts}</select>`,
-    `<label style="font-size:11px;color:var(--text-2);white-space:nowrap"><input type="checkbox" data-save="${i}"> 存为规则</label>`
+    `<select data-save="${i}" style="min-width:120px">
+       <option value="">不存规则</option>
+       <option value="memo"${r.memo ? '' : ' disabled'}>按摘要「${H(r.memo.slice(0, 6))}」</option>
+       <option value="opp"${r.opp ? '' : ' disabled'}>按户名「${H(r.opp.slice(0, 8))}」</option>
+     </select>`
   ]);
   return `<div class="note"><b>逐条指定科目。</b>勾选「存为规则」的，会把该笔<b>摘要的前 4 个字</b>加进规则库，下次自动匹配。不确定的留「跳过」，这些笔不会进凭证文件，会单独导出成清单。</div>`
     + card(`例外清单（${ex.length} 笔）`, table(
@@ -627,10 +777,18 @@ function bindDynamic() {
       go('t2');
     };
   });
-  ['entSel2:ent', 'lineSel:line', 'acctNo:acctNo', 'vchWord:vchWord'].forEach(p => {
+  ['entSel2:ent', 'lineSel:line', 'acctNo:acctNo', 'vchWord:vchWord', 'defProj:defProj'].forEach(p => {
     const [id, key] = p.split(':');
     const el = $(id);
-    if (el) el.onchange = () => { T2[key] = el.value; if (id === 'entSel2') go('t2'); };
+    if (el) el.onchange = () => {
+      if (id === 'entSel2') {
+        T2.entId = el.value;
+        const ei = ENTITIES.find(x => x.id === T2.entId);
+        T2.ent = ei ? ei.full : '';
+        useRuleSet(T2.entId); T2.defProj = '';
+        go('t2');
+      } else T2[key] = el.value;
+    };
   });
 }
 
@@ -643,9 +801,16 @@ document.addEventListener('click', e => {
   if (g) { go(g.dataset.go); return; }
   const tb = e.target.closest('[data-tab]');
   if (tb) { T2.tab = tb.dataset.tab; go('t2'); return; }
+  const ue = e.target.closest('[data-useent]');
+  if (ue) {
+    T2.entId = ue.dataset.useent;
+    const ei = ENTITIES.find(x => x.id === T2.entId);
+    T2.ent = ei ? ei.full : '';
+    useRuleSet(T2.entId); go('tool-rules'); return;
+  }
   const dr = e.target.closest('[data-delrule]');
   if (dr) {
-    RULES = RULES.filter(r => r.id !== dr.dataset.delrule); saveRules(RULES);
+    RULES = RULES.filter(r => r.id !== dr.dataset.delrule); saveRules(T2.entId, RULES);
     toast('规则已删除'); go('tool-rules'); return;
   }
   const a = e.target.closest('[data-act]');
@@ -654,11 +819,17 @@ document.addEventListener('click', e => {
 
   if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {} }); go('t2'); }
   else if (act === 't2run') {
-    T2.ent = ($('entSel2') || {}).value || T2.ent;
+    T2.entId = ($('entSel2') || {}).value || T2.entId;
+    const ei = ENTITIES.find(x => x.id === T2.entId);
+    T2.ent = ei ? ei.full : '';
     T2.line = ($('lineSel') || {}).value || T2.line;
     T2.acctNo = ($('acctNo') || {}).value || '';
-    T2.vchWord = ($('vchWord') || {}).value || '银';
-    if (!T2.ent) { toast('请先选择这批流水属于哪个主体'); return; }
+    T2.vchWord = ($('vchWord') || {}).value || '记';
+    T2.defProj = ($('defProj') || {}).value || '';
+    if (!T2.entId) { toast('请先选择这批流水属于哪个主体'); return; }
+    if (!useRuleSet(T2.entId)) {
+      toast('「' + T2.ent + '」还没有规则库，全部会进例外', 4200);
+    }
     runRules(); T2.step = 3; T2.tab = T2.result.ex.length ? 'ex' : 'ok'; go('t2');
   }
   else if (act === 't2ex') { T2.step = 4; go('t2'); }
@@ -672,10 +843,20 @@ document.addEventListener('click', e => {
       if (sel && sel.value) {
         r.acct = sel.value; r.vmemo = r.memo || acctName(sel.value); r.warn = '';
         T2.result.ok.push(r); fixed++;
-        if (save && save.checked && r.memo) {
-          const kw = r.memo.replace(/[|\\^$*+?.()[\]{}]/g, '').slice(0, 4);
+        // 存为规则：可按摘要，也可按对方户名。
+        // 银行流水里「跨行汇款」「网转」这类摘要是交易类型、不含业务含义，
+        // 这时只能按对方户名建规则。
+        const how = save ? save.value : '';
+        if (how) {
+          const esc = s => s.replace(/[|\\^$*+?.()[\]{}]/g, '');
+          const kw = how === 'opp' ? esc(r.opp).slice(0, 10) : esc(r.memo).slice(0, 4);
           if (kw) {
-            RULES.unshift({ id: uid(), kw, dir: r.dir, acct: sel.value, memo: r.memo.slice(0, 20), hits: 0, src: '例外沉淀' });
+            RULES.unshift({
+              id: uid(), kw, dir: r.dir, acct: sel.value,
+              scope: how === 'opp' ? 'both' : undefined,
+              memo: (how === 'opp' ? r.opp : r.memo).slice(0, 20),
+              hits: 0, src: how === 'opp' ? '例外沉淀·按户名' : '例外沉淀·按摘要',
+            });
             added++;
           }
         }
@@ -683,7 +864,7 @@ document.addEventListener('click', e => {
     });
     T2.result.ok.sort((x, y) => x.no - y.no);
     T2.result.ex = still;
-    if (added) saveRules(RULES);
+    if (added) saveRules(T2.entId, RULES);
     toast(`已处理 ${fixed} 笔${added ? `，新增 ${added} 条规则` : ''}`);
     T2.step = 5; go('t2');
   }
@@ -712,11 +893,11 @@ document.addEventListener('click', e => {
   }
   else if (act === 'addRule') {
     const kw = prompt('关键词（支持正则，用 | 分隔多个）'); if (!kw) return;
-    const acct = prompt('科目编码（如 6602）\n可选：' + ACCOUNTS.slice(0, 8).map(a => a[0]).join(' / ')); if (!acct) return;
-    if (!ACCOUNTS.some(x => x[0] === acct)) { toast('科目编码不存在：' + acct); return; }
+    const acct = prompt('科目编码\n可选：' + ACCOUNTS().slice(0, 8).map(a => a[0]).join(' / ')); if (!acct) return;
+    if (!ACCOUNTS().some(x => x[0] === acct)) { toast('科目编码不存在：' + acct); return; }
     const dir = (prompt('方向：in=收入 / out=支出 / any=不限', 'out') || 'out').trim();
     RULES.unshift({ id: uid(), kw, dir, acct, memo: '', hits: 0, src: '手工新增' });
-    saveRules(RULES); toast('规则已新增'); go('tool-rules');
+    saveRules(T2.entId, RULES); toast('规则已新增'); go('tool-rules');
   }
   else if (act === 'clearLog') {
     if (confirm('确认清空全部处理记录？')) { saveLog([]); toast('已清空'); go('tool-log'); }

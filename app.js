@@ -148,7 +148,7 @@ const RS_YOUQI = {
       byStaff: 1,
       note: '对方户名在在编员工名单里 → 221101 应付职工薪酬；不在 → 560209 管理费用_工资' },
     { kw: '财务.*费用|服务费|代理费', dir: 'out', acct: '560223_{p}', memo: '付服务费' },
-    { kw: '手续费|工本费|短信费|账户管理费', dir: 'out', acct: '560303_{p}', memo: '银行手续费' },
+    { kw: '手续费|汇费|工本费|短信费|账户管理费|年费', dir: 'out', acct: '560303_{p}', memo: '银行手续费' },
   ],
 };
 /* 其余主体尚无规则集——它们业务不同（电商、集包、塑料制造），
@@ -200,10 +200,11 @@ function isStaff(opp) {
 }
 
 /* ============ 规则库（按主体分开存） ============ */
-/* v4：水电收入规则定死花都项目。
+/* v5：手续费规则补「汇费」「年费」（建行对账单里手续费叫汇费）。
+   v4：水电收入规则定死花都项目。
    v3：工资按在编员工名单分流 + 主体默认项目。
    版本号必须随预置规则变更递增，否则老用户浏览器里缓存的旧规则不会更新。 */
-const RULE_KEY = e => 'fsc_t2_rules_' + e + '_v4';
+const RULE_KEY = e => 'fsc_t2_rules_' + e + '_v5';
 const LOG_KEY = 'fsc_t2_log_v1';
 
 function loadRules(entId) {
@@ -251,7 +252,54 @@ const FIELDS = [
 ];
 const ALL_ALIAS = FIELDS.reduce((a, f) => a.concat(f.alias), []);
 
-function autoMap(headerCells) {
+/* 某个单元格算不算「一笔钱」——空、横杠、0 都不算 */
+const cellHasAmt = v => {
+  const s = String(v == null ? '' : v).replace(/[,，\s¥￥]/g, '');
+  if (s === '' || s === '-' || s === '—') return false;
+  const n = Number(s);
+  return !isNaN(n) && n !== 0;
+};
+
+/* 找「借贷两列」。
+   建行这类导出把收入和支出都叫「记账金额」，两列列名一模一样，靠名字分不出来；
+   前面还有两列同样叫「交易金额」但整列是横杠。所以只能看数据形态：
+   相邻两列、各自都出现过数字、且没有任何一行两列同时有数 —— 这就是一对借贷列。 */
+function detectDcPair(body, map, ncol) {
+  const taken = new Set(Object.values(map).filter(v => v !== undefined));
+  for (let i = 0; i + 1 < ncol; i++) {
+    if (taken.has(i) || taken.has(i + 1)) continue;
+    let a = 0, b = 0, both = 0;
+    body.forEach(r => {
+      const x = cellHasAmt(r[i]), y = cellHasAmt(r[i + 1]);
+      if (x) a++; if (y) b++; if (x && y) both++;
+    });
+    if (a > 0 && b > 0 && both === 0) return [i, i + 1];
+  }
+  return null;
+}
+
+/* 两列谁是收入谁是支出：拿余额的变动方向投票。
+   余额变大的那一笔，钱在哪一列，哪一列就是收入。列名骗人，余额不会。 */
+function orderDcPair(body, pair, balCol, asc) {
+  if (balCol === undefined) return null;
+  let firstIsIn = 0, firstIsOut = 0;
+  for (let i = 0; i < body.length; i++) {
+    // 「这笔之前」的余额：正序在上一行，倒序（新的在上面）在下一行
+    const j = asc ? i - 1 : i + 1;
+    if (j < 0 || j >= body.length) continue;
+    const before = numOf(body[j][balCol]), after = numOf(body[i][balCol]);
+    if (!before || !after || before === after) continue;
+    const up = after > before;
+    if (cellHasAmt(body[i][pair[0]])) { up ? firstIsIn++ : firstIsOut++; }
+    else if (cellHasAmt(body[i][pair[1]])) { up ? firstIsOut++ : firstIsIn++; }
+  }
+  if (firstIsIn === firstIsOut) return null;       // 分不出就别猜
+  return firstIsIn > firstIsOut
+    ? { inAmt: pair[0], outAmt: pair[1] }
+    : { inAmt: pair[1], outAmt: pair[0] };
+}
+
+function autoMap(headerCells, body) {
   const map = {};
   const norm = s => String(s || '').replace(/\s|　/g, '');
   headerCells.forEach((h, i) => {
@@ -261,7 +309,7 @@ function autoMap(headerCells) {
       if (f.alias.some(a => c === a)) { map[f.k] = i; return; }
     }
   });
-  // второй проход：包含匹配
+  // 第二趟：包含匹配
   headerCells.forEach((h, i) => {
     const c = norm(h); if (!c) return;
     if (Object.values(map).includes(i)) return;
@@ -270,6 +318,33 @@ function autoMap(headerCells) {
       if (f.alias.some(a => c.includes(a))) { map[f.k] = i; return; }
     }
   });
+
+  if (!body || !body.length) return map;
+
+  // 金额列光看列名会认错：建行导出里「交易金额」整列是横杠，真正的钱在「记账金额」。
+  // 整列一个数都没有的，不当金额列用。
+  ['inAmt', 'outAmt', 'amt'].forEach(k => {
+    if (map[k] === undefined) return;
+    if (!body.some(r => cellHasAmt(r[map[k]]))) delete map[k];
+  });
+
+  // 收入/支出没认出来时，按数据形态找借贷两列，再用余额方向定谁收谁支
+  if (map.inAmt === undefined && map.outAmt === undefined) {
+    const ncol = body.reduce((m, r) => Math.max(m, r.length), headerCells.length);
+    const pair = detectDcPair(body, map, ncol);
+    // 文件是正序还是倒序：判方向要靠它，倒序时「这笔之前」的余额在下一行
+    let asc = true;
+    if (map.date !== undefined) {
+      const ds = body.map(r => normDate(r[map.date])).filter(Boolean);
+      if (ds.length > 1) asc = ds[0] <= ds[ds.length - 1];
+    }
+    const ord = pair ? orderDcPair(body, pair, map.bal, asc) : null;
+    if (ord) {
+      map.inAmt = ord.inAmt; map.outAmt = ord.outAmt;
+      delete map.amt;                 // 有了借贷两列，单列发生额就别再掺和
+      map._dcGuess = [ord.inAmt, ord.outAmt];   // 界面上要如实说这是推断出来的
+    }
+  }
   return map;
 }
 
@@ -632,8 +707,13 @@ function t2Step2() {
   const rows = T2.rows, hr = T2.headRow;
   const header = rows[hr] || [];
   const preview = rows.slice(hr + 1, hr + 4);
+  // 带列序号和样值：银行导出常有两列同名（两个「记账金额」），光看列名选不出来是哪个
+  const sampleOf = j => {
+    const v = preview.map(r => r && r[j]).find(x => String(x == null ? '' : x).trim() !== '' && String(x).trim() !== '-');
+    return v === undefined ? '' : ' ＝ ' + String(v).slice(0, 10);
+  };
   const opts = i => header.map((h, j) =>
-    `<option value="${j}" ${T2.map[i] === j ? 'selected' : ''}>${H(String(h || '(空)').slice(0, 18))}</option>`).join('');
+    `<option value="${j}" ${T2.map[i] === j ? 'selected' : ''}>第${j + 1}列 ${H(String(h || '(空)').slice(0, 14))}${H(sampleOf(j))}</option>`).join('');
   const fieldRows = FIELDS.map(f => [
     H(f.n) + (f.must ? ' <span class="red">*</span>' : ''),
     `<select data-map="${f.k}"><option value="">— 不使用 —</option>${opts(f.k)}</select>`,
@@ -651,6 +731,10 @@ function t2Step2() {
     ${cardp('表头在第几行', `<select id="headSel" style="min-width:340px">${headOpts}</select>
       <div class="note" style="margin:11px 0 0">银行流水前几行常是账号、户名等说明文字，工具已自动猜测表头位置。如果猜错了，在上面改。</div>`)}
     ${card('列对应关系', table([{ t: '需要的字段' }, { t: '对应文件里的哪一列' }, { t: '示例值' }], fieldRows))}
+    ${T2.map._dcGuess ? `<div class="note w"><b>收入/支出这两列是按数据推断的，请核一眼。</b>
+      这份文件里它们的列名一样（分不出谁是谁），所以改用余额的变动方向判断：
+      余额变大的那笔钱在第 ${T2.map._dcGuess[0] + 1} 列 → 当成<b>收入</b>，第 ${T2.map._dcGuess[1] + 1} 列 → 当成<b>支出</b>。
+      推断错了直接在上面改。</div>` : ''}
     ${cardp('这批流水属于', `
       <div class="cols c2">
         <div><div class="field"><label class="fl">主体 <span class="red">*</span></label>
@@ -859,7 +943,7 @@ async function loadFile(file) {
     const rows = await XLSXLite.readTable(file);
     T2.file = file; T2.rows = rows;
     T2.headRow = XLSXLite.findHeaderRow(rows, ALL_ALIAS);
-    T2.map = autoMap(rows[T2.headRow] || []);
+    T2.map = autoMap(rows[T2.headRow] || [], rows.slice(T2.headRow + 1));
     T2.step = 2;
     go('t2');
     const got = Object.keys(T2.map).length;
@@ -883,7 +967,7 @@ function bindDynamic() {
   const hs = $('headSel');
   if (hs) hs.onchange = () => {
     T2.headRow = +hs.value;
-    T2.map = autoMap(T2.rows[T2.headRow] || []);
+    T2.map = autoMap(T2.rows[T2.headRow] || [], T2.rows.slice(T2.headRow + 1));
     go('t2');
   };
   document.querySelectorAll('[data-map]').forEach(sel => {

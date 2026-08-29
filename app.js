@@ -62,21 +62,48 @@ const DOMS = [
 
 /* ============ 主数据 ============ */
 /* 主体：规则库按主体隔离。不同主体业务完全不同，共用一套规则必然记错账。 */
+/* 法人主体 —— 与 T1 账户台账同源（《银行资料信息/银行.xlsx》），简称必须和台账一致，
+   T2 的账户下拉靠简称去 T1 取账户。优栖的 id 保持 'youqi'，否则它的规则库会丢。 */
 const ENTITIES = [
+  { id: 'e01', short: '乐时婴童用品', full: '广州乐时婴童用品有限公司', line: '' },
+  { id: 'e02', short: '星逸文化', full: '广州星逸文化有限公司', line: '' },
+  { id: 'e03', short: '澳乐电子商务科技', full: '广州澳乐电子商务科技有限公司', line: '' },
+  { id: 'e04', short: '橘农农业发展', full: '广州市橘农农业发展有限公司', line: '' },
+  { id: 'e05', short: '萌立方文化', full: '深圳萌立方文化有限公司', line: '' },
+  { id: 'e06', short: '贝堡儿童用品', full: '广州贝堡儿童用品有限公司', line: '' },
+  { id: 'e07', short: '澳乐游玩母婴用品', full: '广州澳乐游玩母婴用品有限公司', line: '' },
+  { id: 'e08', short: '达观文化', full: '广州达观文化有限公司', line: '' },
+  { id: 'e09', short: '星逸贸易', full: '广州市星逸贸易有限公司', line: '' },
+  { id: 'e10', short: '堂品玩具', full: '广州堂品玩具有限公司', line: '' },
+  { id: 'e11', short: '奇妙口袋供应链', full: '广州奇妙口袋供应链有限公司', line: '' },
+  { id: 'e12', short: '有方新媒体科技', full: '广州有方新媒体科技有限公司', line: '' },
+  { id: 'e13', short: '昭妍贸易', full: '广州昭妍贸易有限公司', line: '' },
+  { id: 'e14', short: '源美生物科技', full: '广州源美生物科技有限公司', line: '' },
+  { id: 'e15', short: '锐度生物科技', full: '广州锐度生物科技有限公司', line: '' },
+  { id: 'e16', short: '艺晟生物科技', full: '广州艺晟生物科技有限公司', line: '' },
+  { id: 'e17', short: '荣耀商贸', full: '广州荣耀商贸有限公司', line: '' },
+  { id: 'e18', short: '不易', full: '广州不易文化传播有限公司', line: '' },
+  { id: 'e19', short: '德逸', full: '广州德逸技术有限责任公司', line: '' },
+  { id: 'e20', short: '泰昌', full: '广州泰昌百川管理咨询有限责任公司', line: '' },
+  { id: 'e21', short: '万视', full: '广州万视智能科技有限责任公司', line: '' },
+  { id: 'e22', short: '贝蜜', full: '广州贝蜜电子商务有限公司', line: '' },
+  { id: 'e23', short: '数智', full: '广州数智云仓产业园运营有限公司', line: '' },
+  { id: 'e24', short: '云泰', full: '广州云泰运营管理有限公司', line: '' },
+  { id: 'e25', short: 'AOLE', full: 'AOLE. Limited', line: '' },
   { id: 'youqi', short: '优栖', full: '优栖（广州）服务管理有限公司', line: '出租屋' },
-  { id: 'aole',  short: '澳乐', full: '澳乐', line: '电商' },
-  { id: 'dongbei', short: '东蓓', full: '东蓓', line: '电商' },
-  { id: 'ruimian', short: '瑞眠', full: '瑞眠', line: '电商' },
-  { id: 'mutong', short: '牧童', full: '牧童', line: '电商' },
-  { id: 'xinyi', short: '新艺文化', full: '新艺文化', line: '电商' },
-  { id: 'szyc', short: '数智云仓', full: '数智云仓', line: '物业收租' },
-  { id: 'yunpa', short: '云帕', full: '云帕', line: '物业收租' },
-  { id: 'yundi', short: '云迪', full: '云迪', line: '物业收租' },
-  { id: 'yunji', short: '云基', full: '云基', line: '物业收租' },
-  { id: 'yunpai', short: '云湃', full: '云湃', line: '物业收租' },
-  { id: 'jibao', short: '集包厂', full: '集包厂', line: '集包' },
-  { id: 'cjyt', short: '昌记云泰', full: '昌记云泰', line: '物业收租' },
+  { id: 'e27', short: '钧恒', full: '海南钧恒投资有限公司', line: '' },
+  { id: 'e28', short: '弈晟', full: '海南弈晟企业管理有限公司', line: '' },
+  { id: 'e29', short: '智租', full: '广州智租贸易有限公司', line: '' },
+  { id: 'e30', short: '优机库', full: '广州优机库贸易有限公司', line: '' },
+  { id: 'e31', short: '瑞眠', full: '广州瑞眠科技有限公司', line: '' },
+  { id: 'e32', short: '云迪', full: '广州云迪物业管理服务合伙企业（有限合伙）', line: '' },
+  { id: 'e33', short: '云湃', full: '广州云湃供应链服务合伙企业（有限合伙）', line: '' },
+  { id: 'e34', short: '云帕', full: '广州云帕供应链管理有限公司', line: '' },
+  { id: 'e35', short: '云基', full: '广州云基电子商务合伙企业（有限合伙）', line: '' },
+  { id: 'e36', short: '闪租', full: '广州闪租数码贸易有限公司', line: '' },
+  { id: 'e37', short: '木同', full: '中山市木同日用品有限公司', line: '' },
 ];
+
 const LINES = ['电商', '集包', '物业收租', '手机租赁', '出租屋', '设备租赁', '塑料制造'];
 
 /* ============ 规则集（按主体） ============ */

@@ -519,8 +519,9 @@ S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申�
   </div>`
   + `<div class="note" style="margin-top:12px"><b>报税顺序建议：</b>票据导进销项票、录无票收入 → 增值税/印花税申报表核对生成凭证 → 所得税申报表 → 打开电子税务局照着草稿填 → 回凭证库把税费凭证过账。</div>`;
 
-/* ============ 个税 / 社保 / 残保金申报 ============ */
-/* 三个申报的基数都从账上取（与三大报表同一份数）：
+/* ============ 个税 / 残保金申报 ============ */
+/* 社保不在这里办——公司用社保客户端申报，系统不做这块。
+   两个申报的基数都从账上取（与三大报表同一份数）：
    工资基数 = 本月 2211 应付职工薪酬贷方发生（计提数）
             + 名称含「工资/薪酬」的费用科目借方发生（未走计提、直接进费用的部分）
    这条数就是利润表「管理费用」里的工资，申报、报表、账三处永远一个数。
@@ -542,8 +543,7 @@ function ivWageBase(m) {
 }
 const IV_PORTALS = {
   its: ['自然人电子税务局（个税扣缴）', 'https://its.chinatax.gov.cn', '#c7000b', '税'],
-  etax: ['广东省电子税务局（社保费/残保金）', 'https://etax.guangdong.chinatax.gov.cn', '#00509e', '粤'],
-  rs: ['广东人社 12333 服务平台', 'https://gd.12333.gov.cn', '#009944', '社'],
+  etax: ['广东省电子税务局（残保金）', 'https://etax.guangdong.chinatax.gov.cn', '#00509e', '粤'],
 };
 const ivPortalCards = keys => `<div class="bankgrid">${keys.map(k => { const p = IV_PORTALS[k];
   return `<a class="bank" href="${p[1]}" target="_blank" rel="noopener noreferrer" style="--bc:${p[2]}">
@@ -551,7 +551,7 @@ const ivPortalCards = keys => `<div class="bankgrid">${keys.map(k => { const p =
 const ivTieNote = w => `<div class="note"><b>与三大报表的勾稽：</b>本页基数取自账上工资科目本月发生
   （其中经计提 ${money(w.accrual)}、未计提直发 ${money(w.direct)}），与利润表「管理费用」同源同数；
   申报后生成的计提凭证回凭证库，自动进资产负债表（应交/应付）与利润表（费用）。只放官方
-  chinatax.gov.cn / 12333.gov.cn 域名，别用搜索引擎搜申报入口。</div>`;
+  chinatax.gov.cn 域名，别用搜索引擎搜申报入口。</div>`;
 
 S['iv-iit'] = () => {
   if (!CUR_ENT) return needEnt('个税申报');
@@ -567,23 +567,6 @@ S['iv-iit'] = () => {
     + `<div class="note w"><b>申报口径提醒：</b>扣缴端里逐人的「本期收入」合计应与上面基数对得上；
       对不上通常是有工资走了别的科目或月末没计提——先回凭证库补齐再申报。个税于次月 15 日前申报。</div>`
     + ivPortalCards(['its']);
-};
-
-S['iv-social'] = () => {
-  if (!CUR_ENT) return needEnt('社保申报');
-  const w = ivWageBase(IV.month);
-  return head('社保申报', `${H(entName())} · 费款所属期 ${IV.month}。缴费基数按社保核定为准，本页备账上工资参考与勾稽。`, '纳税申报',
-    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">`)
-    + kpis([
-      { k: '本月工资基数（账上）', v: money(w.total), t: 'g' },
-      { k: '其中：经计提（2211）', v: money(w.accrual) },
-      { k: '未计提直发', v: money(w.direct) },
-    ])
-    + ivTieNote(w)
-    + `<div class="note">广州常用比例（单位侧，以核定为准）：养老 15%（省政策浮动）· 医疗+生育约 6.85% ·
-      失业 0.32%〜0.8% · 工伤按行业 0.1%〜0.95%。社保费在广东已由税务征收，
-      在电子税务局「社保费申报」模块办；单位缴纳部分入账走 借 管理费用/贷 2211，去录凭证补计提。</div>`
-    + ivPortalCards(['etax', 'rs']);
 };
 
 S['iv-dbf'] = () => {

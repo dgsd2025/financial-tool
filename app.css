@@ -236,3 +236,43 @@ input[type=date]{font-family:inherit;font-size:12px;padding:4px 7px;border:1px s
 tr.sum td{background:var(--surface-2);font-weight:600}
 tr.lv1 td{color:var(--text-2);font-weight:600;background:var(--surface)}
 .obin{width:120px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:4px 7px;color:var(--text);font-size:12px;text-align:right}
+
+/* ===== 经营看板（BI 风格） ===== */
+.bi{margin:-18px -16px -70px;padding:20px 22px 46px;min-height:calc(100vh - 96px);
+  background:radial-gradient(1100px 500px at 15% -10%,rgba(34,211,238,.13),transparent 55%),
+             radial-gradient(900px 480px at 85% 0%,rgba(167,139,250,.13),transparent 55%),
+             radial-gradient(700px 500px at 50% 110%,rgba(244,114,182,.08),transparent 60%),#0b1020;color:#cbd5e1}
+.bi-head{display:flex;align-items:flex-start;gap:14px;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap}
+.bi-title{font-size:21px;font-weight:800;background:linear-gradient(90deg,#22d3ee,#a78bfa,#f472b6);
+  -webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:.5px}
+.bi-sub{color:#64748b;font-size:11.5px;margin-top:4px}
+.bi-demo{font-size:11px;color:#fbbf24;border:1px dashed rgba(251,191,36,.5);border-radius:7px;padding:5px 9px;display:inline-flex;align-items:center;gap:8px}
+.bi-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
+.bi-kpi{position:relative;background:linear-gradient(160deg,rgba(30,41,59,.9),rgba(15,23,42,.95));
+  border:1px solid rgba(148,163,184,.14);border-radius:13px;padding:13px 15px;overflow:hidden}
+.bi-kpi::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;background:var(--c);box-shadow:0 0 14px var(--c)}
+.bi-kt{font-size:10.5px;color:#7c8aa0;letter-spacing:.4px}
+.bi-kv{font-size:23px;font-weight:800;color:#f1f5f9;margin:5px 0 2px;font-family:var(--f-mono);text-shadow:0 0 18px color-mix(in srgb,var(--c) 55%,transparent)}
+.bi-ks{font-size:10px;color:#55647a}
+.bi-spark{position:absolute;right:10px;bottom:8px;width:96px;height:26px;opacity:.85}
+.bi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:13px}
+.bi-card{background:linear-gradient(165deg,rgba(30,41,59,.75),rgba(15,23,42,.92));
+  border:1px solid rgba(148,163,184,.13);border-radius:14px;padding:14px 16px;box-shadow:0 10px 34px rgba(2,6,23,.5)}
+.bi-w2{grid-column:span 2}
+@media (max-width:900px){.bi-w2{grid-column:span 1}}
+.bi-ct{font-size:12px;font-weight:700;color:#a8b6cc;margin-bottom:10px;letter-spacing:.4px}
+.bi-center{display:flex;flex-direction:column;align-items:center;gap:10px}
+.bi-legend{display:flex;flex-wrap:wrap;gap:7px 13px;justify-content:center;font-size:10px;color:#8b99b0}
+.bi-legend i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.bi-foot{margin-top:15px;font-size:10px;color:#4c5a70}
+
+/* ===== 网银入口 ===== */
+.bankgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:11px}
+.bank{display:flex;align-items:center;gap:11px;padding:13px 14px;border:1px solid var(--border);
+  border-radius:11px;background:var(--surface);text-decoration:none;transition:box-shadow .15s,transform .15s}
+.bank:hover{box-shadow:0 6px 18px rgba(0,0,0,.12);transform:translateY(-1px)}
+.bank .bi0{width:34px;height:34px;border-radius:9px;background:var(--bc);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-weight:700;font-size:15px;flex:none}
+.bank .bn{color:var(--text);font-size:12.5px;font-weight:600}
+.bank .bu{margin-left:auto;color:var(--text-3);font-size:10px}
+.bcnt{color:var(--ok,#16a34a);font-size:10px;font-weight:700}

@@ -54,7 +54,7 @@ const DOMS = [
   { id: 'tools', n: '工具箱', ic: '🧰', ready: 1, items: [
       ['tool-list', '我的工具'], ['t1', 'T1 资金日报'], ['t2', 'T2 流水转凭证'], ['t3', 'T3 对账核对'], ['t4', 'T4 日损益'],
       ['tool-rules', '规则库'], ['tool-log', '处理记录'], ['tool-plan', '开发排期'] ] },
-  { id: 'fund', n: '资金', ic: '◈', items: [['p-fund-daily', '资金日报'], ['p-fund-account', '账户与U盾'], ['p-fund-recon', '流水与对账'], ['p-pay', '付款申请']] },
+  { id: 'fund', n: '资金', ic: '◈', ready: 1, items: [['fd-banks', '网银入口'], ['p-fund-daily', '资金日报'], ['p-fund-account', '账户与U盾'], ['p-fund-recon', '流水与对账'], ['p-pay', '付款申请']] },
   { id: 'inv', n: '票据', ic: '▼', ready: 1, items: [
       ['iv-in', '进项票'], ['iv-out', '销项票'], ['iv-noinv', '无票收入'],
       ['--纳税申报'],
@@ -77,7 +77,7 @@ const DOMS = [
       ['--其他'],
       ['p-stock', '进销存台账'], ['p-count', '月末盘点'], ['p-close', '月结检查单'],
       ['p-tax-cal', '申报日历'] ] },
-  { id: 'analysis', n: '分析', ic: '◧', items: [['p-dash', '经营看板'], ['p-daily', '日损益'], ['p-project', '项目盈利']] },
+  { id: 'analysis', n: '分析', ic: '◧', ready: 1, items: [['p-dash', '经营看板'], ['p-daily', '日损益'], ['p-project', '项目盈利']] },
   { id: 'control', n: '管控', ic: '⚑', items: [['p-related', '关联方'], ['p-alert', '预警中心'], ['p-log', 'Agent日志']] },
   { id: 'base', n: '基础', ic: '⚙', ready: 1, items: [
       ['bs-acct', '科目设置'],
@@ -1331,7 +1331,6 @@ const PHASE2 = {
   'p-count': ['月末盘点', 'M11', '差异强制归因与处理动作'],
   'p-close': ['月结检查单', 'M5', '24 项清单自动跑、强校验阻断'],
   'p-tax-cal': ['申报日历', 'M6', '征期前 3 工作日红线预警'],
-  'p-dash': ['经营看板', 'M7', '分板块经营、北极星指标'],
   'p-daily': ['日损益', 'M7', '平台数据自动抓取算毛利'],
   'p-project': ['项目盈利', 'M7', '项目/合同级盈利与成本分摊'],
   'p-related': ['关联方', 'M8', '自动打标、独立报告线'],
@@ -1439,6 +1438,7 @@ function go(id) {
   else if (id.startsWith('ac-') || id.startsWith('rp-') || id.startsWith('cs-')) CURD = 'close';
   else if (id.startsWith('iv-')) CURD = 'inv';
   else if (id.startsWith('bs-')) CURD = 'base';
+  else if (id.startsWith('fd-')) CURD = 'fund';
   else {
     const d = DOMS.find(x => x.items.some(i => i.length > 1 && i[0] === id) || x.id === id);
     if (d) CURD = d.id;

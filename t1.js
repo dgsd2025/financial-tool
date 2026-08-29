@@ -970,3 +970,55 @@ document.addEventListener('change', e => {
   if (e.target.id === 't1ratio') { T1_CFG.ratio = Number(e.target.value) || 1.5; t1SaveCfg(T1_CFG); go('t1'); }
   if (e.target.id === 't1rateTh') { T1_CFG.rateTh = Math.abs(Number(e.target.value)) || 10; t1SaveCfg(T1_CFG); go('t1'); }
 });
+
+/* ============ 资金 · 网银入口 ============ */
+/* 广州市常用银行的官网首页直达。只放官网首页、不放登录深链——
+   网银登录页地址银行经常换，从官网首页点「企业网银」进最稳，也防钓鱼。
+   集团在 T1 台账里有账户的银行自动置顶并标账户数。 */
+const FD_BANKS = [
+  ['工商银行', 'icbc', 'https://www.icbc.com.cn', '#c7000b'],
+  ['建设银行', 'ccb', 'https://www.ccb.com', '#0066b3'],
+  ['农业银行', 'abc', 'https://www.abchina.com', '#009944'],
+  ['中国银行', 'boc', 'https://www.boc.cn', '#a71e32'],
+  ['交通银行', 'bocom', 'https://www.bankcomm.com', '#00467f'],
+  ['邮储银行', 'psbc', 'https://www.psbc.com', '#007a3d'],
+  ['招商银行', 'cmb', 'https://www.cmbchina.com', '#c7000b'],
+  ['浦发银行', 'spdb', 'https://www.spdb.com.cn', '#00509e'],
+  ['中信银行', 'citic', 'https://www.citicbank.com', '#c8102e'],
+  ['民生银行', 'cmbc', 'https://www.cmbc.com.cn', '#009b8d'],
+  ['兴业银行', 'cib', 'https://www.cib.com.cn', '#004a8f'],
+  ['光大银行', 'ceb', 'https://www.cebbank.com', '#5c2d91'],
+  ['平安银行', 'pab', 'https://bank.pingan.com', '#ff6600'],
+  ['华夏银行', 'hxb', 'https://www.hxb.com.cn', '#c7000b'],
+  ['广发银行', 'cgb', 'https://www.cgbchina.com.cn', '#c7000b'],
+  ['广州银行', 'gzcb', 'https://www.gzcb.com.cn', '#d61619'],
+  ['广州农商银行', 'grcb', 'https://www.grcbank.com', '#00854a'],
+  ['网商银行', 'mybank', 'https://www.mybank.cn', '#ff6a00'],
+  ['微众银行', 'webank', 'https://www.webank.com', '#0080ff'],
+];
+/* 台账账户名（工行基本户…）→ 银行全名，算出各银行的账户数用来置顶 */
+const FD_SHORT = { 工行: '工商银行', 建行: '建设银行', 农行: '农业银行', 中行: '中国银行',
+  交行: '交通银行', 邮储: '邮储银行', 招行: '招商银行', 浦发: '浦发银行', 中信: '中信银行',
+  民生: '民生银行', 兴业: '兴业银行', 光大: '光大银行', 平安: '平安银行', 华夏: '华夏银行',
+  广发: '广发银行', 网商: '网商银行', 农商: '广州农商银行' };
+S['fd-banks'] = () => {
+  const cnt = {};
+  T1_ACC.filter(a => a.on).forEach(a => {
+    for (const k of Object.keys(FD_SHORT)) {
+      if (String(a.name).includes(k)) { const b = FD_SHORT[k]; cnt[b] = (cnt[b] || 0) + 1; return; }
+    }
+  });
+  const list = FD_BANKS.slice().sort((a, b) => (cnt[b[0]] || 0) - (cnt[a[0]] || 0));
+  const cards = list.map(b => {
+    const n = cnt[b[0]] || 0;
+    return `<a class="bank" href="${b[2]}" target="_blank" rel="noopener noreferrer" style="--bc:${b[3]}">
+      <span class="bi0">${H(b[0].slice(0, 1))}</span>
+      <span class="bn">${H(b[0])}${n ? ` <span class="bcnt">${n} 户</span>` : ''}</span>
+      <span class="bu">${H(b[2].replace('https://', ''))}</span>
+    </a>`;
+  }).join('');
+  return head('网银入口', `广州市常用银行官网直达 · 集团有账户的银行已置顶（来自 T1 账户台账）。`, '资金 · 业务链接')
+    + `<div class="note"><b>只放官网首页，不放登录深链。</b>网银登录页地址银行经常换，从官网首页点「企业网银」进最稳；
+      也别用搜索引擎搜网银登录页——钓鱼站最爱做这个。U盾/证书登录问题打银行对公客服，别信弹窗。</div>`
+    + `<div class="bankgrid">${cards}</div>`;
+};

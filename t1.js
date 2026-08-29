@@ -318,16 +318,17 @@ function t1PutTxns(accId, fileName, recs) {
       bal: (r.bal === null || r.bal === undefined || isNaN(r.bal)) ? null : Number(r.bal),
     });
   });
-  let n = 0;
   const at = new Date().toLocaleString('zh-CN');
   Object.keys(byDate).forEach(d => {
     // total 记原始笔数：超 800 截断时页面要如实标出来，不能让截过的「当日合计」冒充全量
     mine[d] = { file: String(fileName || ''), at, total: byDate[d].length, rows: byDate[d].slice(0, 800) };
-    n += mine[d].rows.length;
   });
   // 每个账户最多留 62 天（约两个月），从最老的掐——localStorage 就那么大
   const ds = Object.keys(mine).sort();
   while (ds.length > 62) { delete mine[ds.shift()]; }
+  // 笔数在掐完旧桶之后再数：导超 62 天的对账单时，被掐掉的部分不能算「已留存」
+  let n = 0;
+  Object.keys(byDate).forEach(d => { if (mine[d]) n += mine[d].rows.length; });
   return t1SaveTxns(all) ? n : 0;
 }
 /** T2 换绑账户时，把写错账户的那几天撤掉（和 t1ClearBalance 同一个纪律）。
@@ -490,7 +491,9 @@ function t1ImpPlan(f) {
       }
     }
     // 流水明细也逐行收，且在账户去重之前——账户一个文件只建一次，交易却是每行一笔。
-    // 认出「日期 + 任一金额列」就是带明细的对账单，每一笔留存给 T1 下钻页（余额是结论，流水是物证）
+    // 认出「日期 + 任一金额列」就是带明细的对账单，每一笔留存给 T1 下钻页（余额是结论，流水是物证）。
+    // 注意：列别名和方向判据抄的是 T2 那份，但 T2 的高级认列（同名双列推断等）这里没有——
+    // 认不出时预览会诚实显示 0 笔并提示，复杂格式走 T2 转换兜底
     if (!blank && im.map.date !== undefined
       && (im.map.inAmt !== undefined || im.map.outAmt !== undefined || im.map.amt !== undefined)) {
       // normDate 认不出的串会原样返回（如「合计」），必须再验一道是不是真日期，
@@ -983,7 +986,8 @@ S['t1-imp'] = () => {
     + (tot.bad ? `<div class="note c"><b>整批共 ${tot.bad} 行没法用，会跳过。</b></div>` : '')
     + (tot.bals ? `<div class="note"><b>余额会写到 ${dates.slice(0, 8).join('、')}${dates.length > 8 ? ` 等 ${dates.length} 天` : ''}</b>，
         在 T1 里标「来自 T1导入」。文件里没有余额日期列时用当前选的日期 ${T1.date}。</div>` : '')
-    + (tot.txns ? `<div class="note g"><b>流水明细 ${tot.txns} 笔会一并留存</b>${tot.txnSkip ? `（另有 ${tot.txnSkip} 行没日期或金额为 0，多为合计/说明行，留不了）` : ''}——导入后在 T1 点主体余额下钻，每一笔直接列出。同一天重复导入整天替换，不会翻倍。</div>` : '')
+    + (tot.txns ? `<div class="note g"><b>流水明细 ${tot.txns} 笔会一并留存</b>${tot.txnSkip ? `（另有 ${tot.txnSkip} 行没日期或金额为 0，多为合计/说明行，留不了）` : ''}——导入后在 T1 点主体余额下钻，每一笔直接列出。同一天重复导入整天替换，不会翻倍；每户最多留最近 62 天，更早的会被掐掉并按实际留存数报。</div>` : '')
+    + (!tot.txns && tot.txnSkip ? `<div class="note w"><b>认出了交易列，但 ${tot.txnSkip} 行都没收上</b>（没日期、金额为 0，或日期认不出来）。检查「日期」对应的列是不是交易日期——对成时间/序号列就会整份收不上。</div>` : '')
     + (t1ImpReady(cur) && p.txns.length === 0 && cur.map.bal !== undefined && cur.map.date !== undefined
         && cur.map.inAmt === undefined && cur.map.outAmt === undefined && cur.map.amt === undefined
       ? `<div class="note w"><b>当前这份没认出收入/支出列，只收余额、不留流水明细。</b>要每一笔都能在 T1 里看到，

@@ -58,7 +58,7 @@ const DOMS = [
   { id: 'inv', n: '票据', ic: '▼', ready: 1, items: [
       ['iv-in', '进项票'], ['iv-out', '销项票'], ['iv-noinv', '无票收入'],
       ['--纳税申报'],
-      ['iv-vat', '增值税申报'], ['iv-cit', '所得税申报'], ['iv-stamp', '印花税申报'] ] },
+      ['iv-vat', '增值税申报'], ['iv-cit', '所得税申报'], ['iv-stamp', '印花税申报'], ['iv-portal', '电子税务局'] ] },
   { id: 'ar', n: '应收', ic: '◫', items: [['p-ar-contract', '合同台账'], ['p-ar-bill', '应收账单'], ['p-ar-claim', '收款认领'], ['p-ar-aging', '账龄与催收']] },
   { id: 'cost', n: '费控', ic: '▧', items: [['p-exp', '报销与费控'], ['p-flow', '审批路由']] },
   { id: 'close', n: '核算', ic: '▩', ready: 1, items: [

@@ -222,7 +222,7 @@ S['iv-vat'] = () => {
   return head('增值税及附加税费申报表' + (p.type === 'small' ? '（小规模纳税人适用）' : '（一般纳税人适用）'),
     `${H(entName())} · 税款所属期 ${IV.month}。销售额 = 销项票 + 无票收入${p.type === 'general' ? '，抵扣 = 进项票 + 上期留抵' : ''}。`, '票据 · 纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
-     <button class="btn" data-act="ivVchVat">生成凭证</button>
+     <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="ivVchVat">生成凭证</button>
      <button class="btn pri" data-act="ivExpVat">导出</button>`)
     + profBar
     + kpis([
@@ -265,7 +265,7 @@ S['iv-cit'] = () => {
   return head('企业所得税月（季）度预缴纳税申报表（A类）',
     `${H(entName())} · ${q.y} 年第 ${q.q} 季度（累计 ${q.y}-01-01 起）。${note}。`, '票据 · 纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
-     <button class="btn" data-act="ivVchCit">生成凭证</button>
+     <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="ivVchCit">生成凭证</button>
      <button class="btn pri" data-act="ivExpCit">导出</button>`)
     + `<div class="note"><b>数据来源：</b>
       <label><input type="radio" name="citSrc" value="book" ${src === 'book' ? 'checked' : ''}> 本系统利润表（推荐，与账一致）</label>
@@ -327,7 +327,7 @@ S['iv-stamp'] = () => {
   });
   return head('印花税申报表', `${H(entName())} · 税款所属期 ${IV.month}。计税金额按合同/账簿实际填，右侧税额实时算${k === 0.5 ? '（小规模六税两费减半已含）' : ''}。`, '票据 · 纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
-     <button class="btn" data-act="stampSave">保存</button>
+     <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="stampSave">保存</button>
      <button class="btn" data-act="ivVchStamp">生成凭证</button>
      <button class="btn pri" data-act="ivExpStamp">导出</button>`)
     + `<div class="note"><b>计税金额要按实际签的合同填</b>，系统只给参考：本月进项票不含税 ${money(inAmt)}、销项票不含税 ${money(outAmt)}（买卖合同可参考）；账上实收资本+资本公积 ${money(capital)}（营业账簿税目，首次或增资当期才计）。没签合同的税目留空。</div>`
@@ -338,6 +338,23 @@ S['iv-stamp'] = () => {
     + card('按税目填报', table([{ t: '税目' }, { t: '税率' }, { t: '计税金额', n: 1 }, { t: '应纳税额', n: 1 }], rows,
       ['<b>合计</b>', '', '', `<b>${money(+total.toFixed(2))}</b>`]));
 };
+
+/* ============ 电子税务局入口 ============ */
+/* 只放官方 chinatax.gov.cn 域名的链接——报税入口是钓鱼重灾区，
+   别用搜索引擎搜「电子税务局登录」。广州企业在广东省电子税务局申报。 */
+S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申报表是草稿，最终以电子税务局生成并提交的为准。', '票据 · 纳税申报')
+  + `<div class="note"><b>认准官方域名 chinatax.gov.cn。</b>别用搜索引擎搜「电子税务局登录」——钓鱼站最爱做这个入口。登录用电子营业执照 / 实名账号，证书问题打 12366。</div>`
+  + `<div class="bankgrid">
+    <a class="bank" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#c7000b">
+      <span class="bi0">税</span><span class="bn">广东省电子税务局 <span class="bcnt">申报入口</span></span><span class="bu">etax.guangdong.chinatax.gov.cn</span></a>
+    <a class="bank" href="https://guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#00509e">
+      <span class="bi0">粤</span><span class="bn">广东省税务局官网</span><span class="bu">guangdong.chinatax.gov.cn</span></a>
+    <a class="bank" href="https://www.chinatax.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#8a6d3b">
+      <span class="bi0">总</span><span class="bn">国家税务总局</span><span class="bu">www.chinatax.gov.cn</span></a>
+    <a class="bank" href="https://12366.chinatax.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#009944">
+      <span class="bi0">12</span><span class="bn">12366 纳税服务平台</span><span class="bu">12366.chinatax.gov.cn</span></a>
+  </div>`
+  + `<div class="note" style="margin-top:12px"><b>报税顺序建议：</b>票据导进销项票、录无票收入 → 增值税/印花税申报表核对生成凭证 → 所得税申报表 → 打开电子税务局照着草稿填 → 回凭证库把税费凭证过账。</div>`;
 
 /* ============ 申报表 → 生成凭证 ============ */
 /* 每张申报表可一键生成计提凭证，直接进凭证库：

@@ -50,7 +50,10 @@ function rptChecks() {
     if (Math.abs(dr - cr) > 0.005) unbal++;
   });
   const unposted = all.filter(v => !v.posted).length;
-  return { total: all.length, unbal, unposted, block: unbal > 0 };
+  // 凭证里出现过固定资产类科目（16xx/17xx）才提折旧；没有就明说不适用，
+  // 别拿一条永远待确认的折旧提醒烦没有固定资产的主体
+  const hasFA = all.some(v => v.lines.some(l => /^(16|17)/.test(rptBase(l.acct))));
+  return { total: all.length, unbal, unposted, hasFA, block: unbal > 0 };
 }
 function rptCheckNote() {
   const c = rptChecks();
@@ -58,7 +61,9 @@ function rptCheckNote() {
   let h = '';
   if (c.block) h += `<div class="note c"><b>${c.unbal} 张凭证借贷不平，报表已禁止生成。</b>出一张自己都不信的报表，比不出更糟——先去凭证库改平。</div>`;
   if (c.unposted) h += `<div class="note w"><b>${c.unposted} 张未过账。</b>当前报表${AC.inc ? '<b>包含</b>' : '<b>不含</b>'}未过账凭证（在科目余额表切换）。正式出表前应全部过账。</div>`;
-  h += `<div class="note"><b>计提类凭证请自查。</b>T2 只处理银行流水——折旧、工资计提、税金计提这类不走银行的分录，系统看不见缺没缺，需要手工确认已在凭证库里。</div>`;
+  h += c.hasFA
+    ? `<div class="note"><b>计提类凭证请自查。</b>凭证里有固定资产科目——折旧、工资计提、税金计提这类不走银行的分录，系统看不见缺没缺，需要手工确认已在凭证库里。</div>`
+    : `<div class="note"><b>计提提醒：</b>本期凭证未出现固定资产科目，折旧不适用；工资、税金若需计提仍要手工补凭证。</div>`;
   return h;
 }
 
@@ -83,7 +88,9 @@ S['rp-home'] = () => {
         c.unbal ? `${c.unbal} 张不平，去凭证库处理` : '全部平衡'],
       ['无未过账凭证', c.unposted ? pill('未通过', 'wa') : pill('通过', 'ok'),
         c.unposted ? `${c.unposted} 张待过账（当前报表${AC.inc ? '含' : '不含'}未过账）` : '全部已过账'],
-      ['计提类凭证齐全', pill('待确认', 'wa'), 'T2 只处理银行流水，折旧/计提/结转需手工补，系统无法代查'],
+      ['计提类凭证齐全', c.hasFA ? pill('待确认', 'wa') : pill('折旧不适用', 'ok'),
+        c.hasFA ? '有固定资产科目，折旧/计提/结转需手工补，系统无法代查'
+                : '本期无固定资产科目，折旧不适用；工资/税金计提若有仍需手工补'],
     ]));
 };
 
@@ -230,7 +237,7 @@ S['rp-cf'] = () => {
     .concat(Object.keys(a.items).sort().map(k =>
       [`　${H(k)}`, a.items[k].in ? money(a.items[k].in) : '', a.items[k].out ? money(a.items[k].out) : '']))
     .concat([{ cls: 'sum', d: [`<b>${t.slice(0, t.length - 1)}净额</b>`, '', `<b>${money(netOf(a))}</b>`] }]);
-  return head('现金流量表', `${H(entName())} · ${AC.from}〜${AC.to}。从凭证里货币资金的对方科目直接归类；混合凭证按金额最大的对方科目归入，属简化口径。`, '报表中心 · 会企03表',
+  return head('现金流量表', `${H(entName())} · ${AC.from}〜${AC.to}。货币资金口径 = 库存现金(1001) + 银行存款(1002) + 其他货币资金(1012)，三者互转不计现金流。从对方科目直接归类；混合凭证按金额最大的对方科目归入，属简化口径。`, '报表中心 · 会企03表',
     `期间 ${acRangeHtml('ac')} <button class="btn pri" data-act="rptExpCf">导出</button>`)
     + kpis([
       { k: '经营活动净额', v: money(netOf(d.acts.op)), t: netOf(d.acts.op) >= 0 ? 'g' : 'c' },

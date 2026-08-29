@@ -227,3 +227,4 @@ input[type=date]{font-family:inherit;font-size:12px;padding:4px 7px;border:1px s
 
 /* 账簿：期初/合计行 */
 tr.sum td{background:var(--surface-2);font-weight:600}
+tr.lv1 td{color:var(--text-2);font-weight:600;background:var(--surface)}

@@ -65,7 +65,8 @@ const DOMS = [
       ['--固定资产'],
       ['p-fa', '资产卡片'], ['p-fadep', '折旧计提'],
       ['--报表中心'],
-      ['p-report', '报表中心'],
+      ['rp-home', '报表首页'], ['rp-bs', '资产负债表'], ['rp-pl', '利润表'],
+      ['rp-cf', '现金流量表'], ['rp-exp', '费用明细表'],
       ['--其他'],
       ['p-stock', '进销存台账'], ['p-count', '月末盘点'], ['p-close', '月结检查单'],
       ['p-tax-cal', '申报日历'] ] },
@@ -1311,7 +1312,6 @@ const PHASE2 = {
   'p-stock': ['进销存台账', 'M11', '加权平均法、期初只读自动推算'],
   'p-count': ['月末盘点', 'M11', '差异强制归因与处理动作'],
   'p-close': ['月结检查单', 'M5', '24 项清单自动跑、强校验阻断'],
-  'p-report': ['报表中心', 'M5', '报表 5 号前出齐'],
   'p-tax-cal': ['申报日历', 'M6', '征期前 3 工作日红线预警'],
   'p-dash': ['经营看板', 'M7', '分板块经营、北极星指标'],
   'p-daily': ['日损益', 'M7', '平台数据自动抓取算毛利'],
@@ -1402,7 +1402,7 @@ function renderNav() {
 }
 function go(id) {
   if (/^t[1234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
-  else if (id.startsWith('ac-')) CURD = 'close';
+  else if (id.startsWith('ac-') || id.startsWith('rp-')) CURD = 'close';
   else {
     const d = DOMS.find(x => x.items.some(i => i.length > 1 && i[0] === id) || x.id === id);
     if (d) CURD = d.id;

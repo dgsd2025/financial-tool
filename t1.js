@@ -583,7 +583,46 @@ S['t1'] = () => {
       </div>`);
 };
 
-/* 主体明细（下钻第一层）：这个主体的余额由哪些账户组成、每个数取自哪天、谁写进来的 */
+/* 一个账户留存的流水按天渲染成卡片（新的在前）。t1-ent 内联和 t1-txn 全量共用这一份，
+   两个页面的口径不会走样。limitRows 只在内联场景用：行数凑够就停在整天边界，
+   截了多少由返回值报给调用方，调用方必须如实标出来——不许静默少显示。 */
+function t1TxnBlocks(accId, opt) {
+  const o = opt || {};
+  const mine = (o.store || t1LoadTxns())[accId] || {};
+  const dates = Object.keys(mine).sort().reverse();
+  const out = { html: '', days: 0, rows: 0, totalDays: dates.length, totalRows: 0 };
+  dates.forEach(d => { out.totalRows += mine[d].rows.length; });
+  const parts = [];
+  for (const d of dates) {
+    if (o.limitRows && out.rows >= o.limitRows) break;
+    const b = mine[d];
+    let inS = 0, outS = 0;
+    const rows = b.rows.map(r => {
+      if (r.dir === 'in') inS += r.amt; else outS += r.amt;
+      return [
+        H(r.memo || '—'),
+        r.opp ? H(r.opp) : '<span class="mut">—</span>',
+        r.dir === 'in' ? `<span class="grn">+${money(r.amt)}</span>` : '<span class="mut">—</span>',
+        r.dir === 'out' ? `<span class="red">−${money(r.amt)}</span>` : '<span class="mut">—</span>',
+        (r.bal === null || r.bal === undefined) ? '<span class="mut">—</span>' : money(r.bal),
+        r.ref ? `<span class="code">${H(r.ref)}</span>` : '<span class="mut">—</span>',
+      ];
+    });
+    const cut = b.total && b.total > b.rows.length;
+    parts.push(card(`${o.prefix || ''}${d} · ${b.rows.length} 笔${cut ? `（原 ${b.total} 笔，超上限已截断，当日合计只含留存部分）` : ''} · 来自「${b.file || '导入'}」`, table(
+      [{ t: '摘要' }, { t: '对方户名' }, { t: '收入（元）', n: 1 }, { t: '支出（元）', n: 1 },
+       { t: '当时余额（元）', n: 1 }, { t: '流水号' }], rows,
+      ['<b>当日合计</b>', '',
+       `<b class="grn">+${money(inS)}</b>`, `<b class="red">−${money(outS)}</b>`,
+       `<b>净 ${inS - outS >= 0 ? '+' : ''}${money(inS - outS)}</b>`, ''])));
+    out.days++; out.rows += b.rows.length;
+  }
+  out.html = parts.join('');
+  return out;
+}
+
+/* 主体明细（下钻第一层）：这个主体的余额由哪些账户组成、每个数取自哪天、谁写进来的；
+   导入留存的每一笔流水直接列在页面下方——物证不藏在链接后面 */
 S['t1-ent'] = () => {
   const ent = T1.drillEnt;
   const e = ent ? t1ByEnt(T1.date).find(x => x.ent === ent) : null;
@@ -619,7 +658,25 @@ S['t1-ent'] = () => {
     : `<div class="note ${e.rateWarn ? 'c' : 'g'}"><b>较上日变动率 ${e.rate >= 0 ? '+' : ''}${e.rate.toFixed(2)}% → ${e.rateWarn ? '预警' : '正常'}。</b>
        算法：（今日合计 ${money(e.bal)} − 上一日 ${H(prevD)} 合计 ${money(e.prev)}）÷ ${money(e.prev)}；预警阈值 ±${T1_CFG.rateTh}%。</div>`;
 
-  return head(`${ent} · 资金明细`, `${T1.date} 各账户余额与来源。<b>点「流水 N 笔」看导入的每一笔</b>；没有流水的账户，余额是手工录或台账导的。`, '工具箱 · T1',
+  // 物证内联：导入过的每一笔直接列在下面。单页最多内联 300 笔防卡死，
+  // 超了停在整天边界、如实标出还剩多少，一键去该账户的全量页。
+  const INLINE_MAX = 300;
+  const txnAccs = e.accs.filter(a => txns[a.id] && Object.keys(txns[a.id]).length);
+  let totDays = 0, totRows = 0;
+  const detail = txnAccs.map(a => {
+    const tb = t1TxnBlocks(a.id, { store: txns, limitRows: INLINE_MAX,
+      prefix: txnAccs.length > 1 ? a.name + ' · ' : '' });
+    totDays += tb.totalDays; totRows += tb.totalRows;
+    return tb.html + (tb.rows < tb.totalRows
+      ? `<div class="note w"><b>${H(a.name)} 还有 ${tb.totalDays - tb.days} 天 ${tb.totalRows - tb.rows} 笔没在本页展开</b>（单页最多内联 ${INLINE_MAX} 笔，防止页面过长）。
+         <span class="lnk" data-t1txn="${a.id}">查看该账户全部 ${tb.totalDays} 天 ${tb.totalRows} 笔 →</span></div>`
+      : '');
+  }).join('');
+  const detailIntro = txnAccs.length
+    ? `<div class="note g"><b>流水明细 · 每一笔都列在下面：</b>共 ${totDays} 天 ${totRows} 笔，来自 T2 转换银行流水时的自动留存，按交易日分块、新的在前。同一天重复导入整天替换，不会重复累计；每户最多留最近 62 天。</div>` + detail
+    : `<div class="note"><b>该主体还没有留存的流水明细。</b>上面的余额来自手工录入或台账导入——用 <b>T2 银行流水转凭证</b>处理一次网银流水，每一笔会自动留存并直接列在这里。</div>`;
+
+  return head(`${ent} · 资金明细`, `${T1.date} 各账户余额与来源。<b>导入过的流水每一笔都直接列在下方</b>；没有流水的账户，余额是手工录或台账导的。`, '工具箱 · T1',
     `<input type="date" id="t1date" value="${T1.date}">
      <button class="btn" data-t1go="daily">← 返回日报</button>
      <button class="btn" data-t1go="entry">录入余额</button>`)
@@ -628,6 +685,7 @@ S['t1-ent'] = () => {
       { k: '较上一日', v: e.delta === null ? '—' : (e.delta >= 0 ? '+' : '') + money(e.delta), u: e.delta === null ? '' : '元', t: e.delta === null ? '' : (e.delta >= 0 ? 'g' : 'c') },
       { k: '较上日变动率', v: e.rate === null ? '—' : (e.rate >= 0 ? '+' : '') + e.rate.toFixed(2) + '%', t: e.rate === null ? '' : (e.rateWarn ? 'c' : 'g') },
       { k: '账户', v: `${e.n}<small> / ${e.n + e.miss}</small>`, d: e.miss ? `${e.miss} 户从未录入` : '全部有数' },
+      { k: '留存流水', v: String(totRows), u: '笔', d: totRows ? `${totDays} 天 · 全部列在下方` : '导过 T2 流水才有', t: totRows ? 'g' : '' },
     ])
     + exp
     + (e.miss ? `<div class="note w"><b>${e.miss} 个账户从未录入余额</b>，上面的合计与变动率只含已录入的 ${e.n} 户。</div>` : '')
@@ -635,51 +693,29 @@ S['t1-ent'] = () => {
       [{ t: '账户 / 平台' }, { t: '余额（元）', n: 1 }, { t: '较上日（元）', n: 1 },
        { t: '数据取自' }, { t: '余额来源' }, { t: '流水明细' }], rows,
       ['<b>合计</b>', `<b>${money(e.bal)}</b>`,
-       e.delta === null ? '—' : `<b>${e.delta >= 0 ? '+' : ''}${money(e.delta)}</b>`, '', '', '']));
+       e.delta === null ? '—' : `<b>${e.delta >= 0 ? '+' : ''}${money(e.delta)}</b>`, '', '', '']))
+    + detailIntro;
 };
 
-/* 流水明细（下钻第二层）：T2 导入时留存的原始流水，按天分块 */
+/* 流水明细（下钻第二层）：一个账户的全量留存，不设内联上限。
+   渲染逻辑在 t1TxnBlocks，和 t1-ent 内联共用一份。 */
 S['t1-txn'] = () => {
   const a = t1AccById(T1.drillAcc);
   if (!a) return S['t1']();
-  const mine = t1LoadTxns()[a.id] || {};
-  const dates = Object.keys(mine).sort().reverse();
   const back = `<button class="btn" data-t1go="ent">← 返回 ${H(a.ent)} 明细</button>
      <button class="btn" data-t1go="daily">返回日报</button>`;
+  const tb = t1TxnBlocks(a.id);
 
-  if (!dates.length) {
+  if (!tb.totalDays) {
     return head(`${a.ent} · ${a.name} · 流水明细`, '这个账户还没有留存的流水。', '工具箱 · T1', back)
       + `<div class="soonbox"><div class="si">▷</div><h3>暂无流水明细</h3>
          <p>它的余额来自手工录入或台账导入。用 <b>T2 银行流水转凭证</b>处理一次这个账户的网银流水后，每一笔都会留存在这里。</p></div>`;
   }
 
-  const blocks = dates.map(d => {
-    const b = mine[d];
-    let inS = 0, outS = 0;
-    const rows = b.rows.map(r => {
-      if (r.dir === 'in') inS += r.amt; else outS += r.amt;
-      return [
-        H(r.memo || '—'),
-        r.opp ? H(r.opp) : '<span class="mut">—</span>',
-        r.dir === 'in' ? `<span class="grn">+${money(r.amt)}</span>` : '<span class="mut">—</span>',
-        r.dir === 'out' ? `<span class="red">−${money(r.amt)}</span>` : '<span class="mut">—</span>',
-        (r.bal === null || r.bal === undefined) ? '<span class="mut">—</span>' : money(r.bal),
-        r.ref ? `<span class="code">${H(r.ref)}</span>` : '<span class="mut">—</span>',
-      ];
-    });
-    const cut = b.total && b.total > b.rows.length;
-    return card(`${d} · ${b.rows.length} 笔${cut ? `（原 ${b.total} 笔，超上限已截断，当日合计只含留存部分）` : ''} · 来自「${b.file || '导入'}」`, table(
-      [{ t: '摘要' }, { t: '对方户名' }, { t: '收入（元）', n: 1 }, { t: '支出（元）', n: 1 },
-       { t: '当时余额（元）', n: 1 }, { t: '流水号' }], rows,
-      ['<b>当日合计</b>', '',
-       `<b class="grn">+${money(inS)}</b>`, `<b class="red">−${money(outS)}</b>`,
-       `<b>净 ${inS - outS >= 0 ? '+' : ''}${money(inS - outS)}</b>`, '']));
-  }).join('');
-
   return head(`${a.ent} · ${a.name} · 流水明细`,
-    `T2 转换流水时自动留存，共 <b>${dates.length}</b> 天。同一天重复导入会整天替换，不会重复累计；最多留最近 62 天。`,
+    `T2 转换流水时自动留存，共 <b>${tb.totalDays}</b> 天 <b>${tb.totalRows}</b> 笔，全部列在下面。同一天重复导入会整天替换，不会重复累计；最多留最近 62 天。`,
     '工具箱 · T1', back)
-    + blocks;
+    + tb.html;
 };
 
 /* 录入 */

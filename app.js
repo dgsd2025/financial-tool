@@ -71,13 +71,13 @@ const DOMS = [
       ['--其他'],
       ['p-stock', '进销存台账'], ['p-count', '月末盘点'], ['p-close', '月结检查单'],
       ['p-tax-cal', '申报日历'] ] },
-  { id: 'analysis', n: '分析', ic: '◧', ready: 1, items: [['p-dash', '经营看板'], ['p-daily', '日损益'], ['p-project', '项目盈利']] },
   { id: 'report', n: '报表', ic: '▤', ready: 1, items: [
       ['rp-home', '报表首页'], ['rp-bs', '资产负债表'], ['rp-pl', '利润表'],
       ['rp-cf', '现金流量表'], ['rp-exp', '费用明细表'],
       ['--合并报表'],
       ['cs-set', '合并设置'], ['cs-reg', '内部交易登记'], ['cs-elim', '抵消分录'],
       ['cs-bs', '合并资产负债表'], ['cs-pl', '合并利润表'], ['cs-cf', '合并现金流量表'] ] },
+  { id: 'analysis', n: '分析', ic: '◧', ready: 1, items: [['p-dash', '经营看板'], ['p-daily', '日损益'], ['p-project', '项目盈利']] },
   { id: 'base', n: '基础', ic: '⚙', ready: 1, items: [
       ['bs-acct', '科目设置'],
       ['--辅助核算'],
@@ -1368,7 +1368,7 @@ function acRangeHtml(pfx) {
 function renderPerBar() {
   const bar = $('perBar'), box = $('perRange');
   if (!bar || !box) return;
-  const on = (CURD === 'close' || CURD === 'report') && typeof AC !== 'undefined';
+  const on = (CURD === 'close' || CURD === 'report' || CURD === 'analysis') && typeof AC !== 'undefined';
   bar.style.display = on ? '' : 'none';
   if (on) box.innerHTML = acRangeHtml('per');
 }

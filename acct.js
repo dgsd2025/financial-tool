@@ -107,7 +107,10 @@ function acctByMonth(entId, acct, year, inc) {
 
 /* ============ 状态 ============ */
 const AC = {
-  period: new Date().toISOString().slice(0, 7),
+  // 记住上次选的期间；默认本月。用 ym() 而不是 toISOString——后者按 UTC 算，
+  // 东八区每月 1 号早上 8 点前会算成上个月。
+  period: (() => { try { return localStorage.getItem('fsc_ac_period') || ym(new Date()); }
+                   catch (e) { return ym(new Date()); } })(),
   inc: 1,          // 是否含未过账凭证
   acct: '',        // 明细账/总分类账当前科目
   showZero: 0,     // 科目余额表是否显示无发生额科目
@@ -136,7 +139,7 @@ S['ac-vch'] = () => {
     ];
   });
   return head('凭证库', `${H(entName())} · 账簿的唯一数据来源。<b>T2 生成的凭证在这里入库</b>，账簿与报表全部从这里实时汇总。`, '核算 · 链条起点',
-    `<span class="sel">期间 <b>${AC.period}</b></span>
+    `期间 ${perSelectHtml('acPerSel')}
      <button class="btn" data-act="acPostAll">全部过账</button>
      <button class="btn pri" data-s="t2">去 T2 生成凭证</button>`)
     + kpis([
@@ -173,7 +176,7 @@ S['ac-bal'] = () => {
     `<button class="btn sm" data-acd="${H(o.acct)}">明细</button>`,
   ]);
   return head('科目余额表', `${H(entName())} · 期初、本期、本年累计、期末，四组借贷。`, '核算 · 账簿',
-    `<span class="sel">期间 <b>${AC.period}</b></span>
+    `期间 ${perSelectHtml('acPerSel')}
      <button class="btn" data-act="acToggleZero">${AC.showZero ? '隐藏' : '显示'}无发生额</button>
      <button class="btn" data-act="acToggleInc">${AC.inc ? '含' : '不含'}未过账</button>
      <button class="btn pri" data-act="acExpBal">导出</button>`)
@@ -213,7 +216,7 @@ S['ac-detail'] = () => {
   ]) : [];
   return head('明细账', `${H(entName())} · 三栏式，按科目逐笔。`, '核算 · 账簿',
     `<select id="acAcctSel">${accts.map(a => `<option value="${H(a.acct)}" ${a.acct === AC.acct ? 'selected' : ''}>${H(a.acct)} ${H(a.name || acctName(a.acct))}</option>`).join('')}</select>
-     <span class="sel">期间 <b>${AC.period}</b></span>
+     期间 ${perSelectHtml('acPerSel')}
      <button class="btn pri" data-act="acExpDetail">导出</button>`)
     + (accts.length
       ? card(`明细账 · ${H(AC.acct)} ${H(nm)}`, table(
@@ -303,4 +306,5 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'acAcctSel') { AC.acct = e.target.value; go(CURS); }
+  if (e.target.id === 'acPerSel') setPeriod(e.target.value);
 });

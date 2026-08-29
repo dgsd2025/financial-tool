@@ -150,7 +150,7 @@ button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-
 <body>
 <div class="bar1">
   <span class="logo">财</span>
-  <span class="t">核算与经营看板 · UI 设计<i>待确认 · 未开发</i></span>
+  <span class="t">核算 · UI 设计<i>待确认 · 未开发</i></span>
   <span class="sp"></span>
   <span class="sel">主体 <b>优栖（广州）服务管理</b></span>
   <span class="sel">期间 <b>2026-08</b></span>
@@ -566,86 +566,10 @@ S.exp=()=>head('费用明细表','不属三大表，但管理层看得最多。�
 +`<div class="note w"><b>折旧费那一行是空的</b>，因为 8 月还没计提。这也说明<b>固定资产模块必须排在报表之前</b>——
   否则费用表永远缺一块，而且缺的这块通常还不小。</div>`;
 
-/* ══════ 经营看板 ══════ */
-const ENTS=[
- {n:'优栖',f:'优栖（广州）服务管理',rev:14455,pft:-147980,cash:453745,ar:113434,risk:'c',
-  sp:[62,58,71,66,74,69,55,41],note:'凭证不全，本期为负'},
- {n:'澳乐',f:'广州澳乐电子商务科技',rev:1062000,pft:142000,cash:727200,ar:284600,risk:'g',sp:[48,52,55,61,58,66,72,78]},
- {n:'东蓓',f:'东蓓',rev:242000,pft:33800,cash:131600,ar:86400,risk:'w',sp:[55,51,48,52,49,46,44,42],note:'覆盖倍数 1.18 触红线'},
- {n:'数智云仓',f:'广州数智云仓产业园运营',rev:48000,pft:13200,cash:288200,ar:42800,risk:'g',sp:[40,42,45,44,48,50,52,54]},
- {n:'集包厂',f:'集包厂',rev:124000,pft:17800,cash:313000,ar:64200,risk:'g',sp:[58,60,57,62,65,63,68,70]},
- {n:'云迪',f:'广州云迪物业管理服务',rev:0,pft:0,cash:40000,ar:0,risk:'w',sp:[0,0,0,0,0,0,0,12],note:'刚起步，仅 3 笔流水'},
-];
-const spark=a=>`<div class="spark">${a.map((v,i)=>`<i class="${i===a.length-1?'hi':''}" style="height:${Math.max(4,v)}%"></i>`).join('')}</div>`;
-const barh=(l,p,v,c)=>`<div class="bar-h"><span class="lb">${H(l)}</span><span class="tr"><i class="${c||''}" style="width:${Math.max(0,Math.min(100,p))}%"></i></span><span class="vv">${v}</span></div>`;
-
-S.dash=()=>head('经营看板','老板视角：一屏看完所有主体。<b>每张卡点进去就是该主体的账簿与报表</b>——看板与账务前后打通，不是两套数。','分析 · M7',
- `<span class="sel">期间 <b>2026-08</b></span><span class="sel">口径 <b>管理报表</b></span><button class="btn">导出</button>`)
-+kpis([
- {k:'在营主体',v:'6',u:'/ 37',d:'其余未启用'},
- {k:'合并收入',v:'149.0',u:'万'},
- {k:'合并利润',v:'5.9',u:'万',t:'w'},
- {k:'资金总额',v:'195.4',u:'万'},
- {k:'应收余额',v:'59.1',u:'万'},
- {k:'风险主体',v:'3',u:'家',t:'c'},
-])
-+`<div class="note c"><b>看板只呈现，不粉饰。</b>数据来自账簿，账簿来自凭证——<b>凭证不全的主体会明确标出来</b>，
- 而不是给一个看起来正常的数。下面优栖那张卡就是例子。</div>`
-+cardp('各主体经营概况（点卡片进该主体账簿）',`<div class="bcards">${ENTS.map(e=>`
- <button class="bc ${e.risk}" data-s="bs">
-   <div class="en">${H(e.n)}</div><div class="sub3">${H(e.f)}</div>
-   <div class="big" style="color:${e.pft<0?'var(--crit)':'var(--text)'}">${e.pft<0?'-':''}${M(Math.abs(e.pft)/10000)}<small style="font-size:11px;color:var(--text-3)"> 万利润</small></div>
-   <div class="row2"><span>收入</span><b>${M(e.rev/10000)} 万</b></div>
-   <div class="row2"><span>资金</span><b>${M(e.cash/10000)} 万</b></div>
-   <div class="row2"><span>应收</span><b>${M(e.ar/10000)} 万</b></div>
-   ${spark(e.sp)}
-   ${e.note?`<div style="margin-top:7px">${pill(e.note,e.risk==='c'?'cr':'wa')}</div>`:''}
- </button>`).join('')}</div>`)
-+`<div class="cols c2">
- ${cardp('收入构成（按主体）',ENTS.filter(e=>e.rev>0).sort((a,b)=>b.rev-a.rev).map(e=>
-   barh(e.n,e.rev/1062000*100,M(e.rev/10000)+' 万')).join(''))}
- ${cardp('需要老板关注的事',`<div class="alerts">
-   <div class="al c"><span class="ai">⚑</span><div><b>东蓓资金覆盖倍数 1.18</b><br>
-     <span class="mut">低于 1.5 倍红线。月固定支出 112 万，账面 131.6 万。</span></div></div>
-   <div class="al c"><span class="ai">⚑</span><div><b>优栖 8 月账面亏损 14.8 万</b><br>
-     <span class="mut">凭证不全所致——租金收入挂应收未确认，成本已全额入账。非真实亏损。</span></div></div>
-   <div class="al"><span class="ai">◷</span><div><b>3 家主体本月折旧未计提</b><br>
-     <span class="mut">利润表少计费用，报表暂不可用于对外。</span></div></div>
-   <div class="al"><span class="ai">◉</span><div><b>云迪收到出资 4 万（李堪珍）</b><br>
-     <span class="mut">合伙人资金动作，已触发独立报告线，请确认出资手续齐备。</span></div></div>
- </div>`)}
-</div>`
-+`<div class="note"><b>「前后联通」怎么实现：</b>看板不另存一份数——
- 卡片上的每个数字都能<b>点下去看到出处</b>：利润→利润表→科目余额表→明细账→那张凭证→那笔银行流水。
- 一条链到底，中间没有人工搬运，所以老板看到的数和会计做的账<b>永远是同一份</b>。</div>`;
-
-S.drill=()=>head('下钻路径','这是看板可信的关键。任何一个数都能一路点到原始凭证。','分析 · 设计说明')
-+`<div class="chain">
- <div class="cn now"><div class="t2">看板</div><div class="d2">优栖 利润 -14.8 万</div></div>
- <div class="cn"><div class="t2">利润表</div><div class="d2">营业成本 124,930</div></div>
- <div class="cn"><div class="t2">科目余额表</div><div class="d2">5402 其他业务成本</div></div>
- <div class="cn"><div class="t2">明细账</div><div class="d2">记-1 逐笔 24 行</div></div>
- <div class="cn"><div class="t2">凭证</div><div class="d2">冼村31号607黄巧嫦</div></div>
- <div class="cn"><div class="t2">银行流水</div><div class="d2">跨行汇款 6,080</div></div>
-</div>`
-+`<div class="note g"><b>六层，每层都可点。</b>老板问「这 14.8 万亏在哪」，不用回去问会计——自己点四下就看到是付给黄巧嫦的 6,080 元房租。</div>`
-+`<div class="cols c2">
- ${cardp('看板取数来源',table([{t:'看板指标'},{t:'来自'},{t:'再往上'}],[
-   ['收入 / 利润','利润表','科目余额表 → 凭证'],
-   ['资金','T1 资金日报 + 银行存款科目','银行流水'],
-   ['应收','科目余额表 1122','明细账 → 凭证'],
-   ['风险标记','T1 红线 + 月结检查单','各自规则'],
-   ['趋势条','总分类账逐月','明细账'],
- ]))}
- ${cardp('不做的三件事',table([{t:'不做'},{t:'为什么'}],[
-   ['看板单独存一份汇总数','两份数必然对不上，且没人知道该信哪份'],
-   ['凭证不全时给"预估值"','预估值会被当成真实经营结果讨论'],
-   ['为了好看做同比环比','数据只有 8 个月且口径变过，同比无意义'],
- ]))}
-</div>`;
+/* 看板与逐层追溯两屏已移出核算，归「分析」模块（负责人拍板）。原稿见 git 8addf2c。 */
 
 const NAV=[
- ['plan','总览'],['—经营看板'],['dash','经营看板'],['drill','下钻路径'],['—账簿'],['bal','科目余额表'],['detail','明细账'],['gl','总分类账'],
+ ['plan','总览'],['—账簿'],['bal','科目余额表'],['detail','明细账'],['gl','总分类账'],
  ['—固定资产'],['fa','资产卡片'],['facard','卡片详情'],['dep','折旧计提'],['dept','折旧明细表'],
  ['—报表中心'],['rpt','报表首页'],['bs','资产负债表'],['pl','利润表'],['cf','现金流量表'],['exp','费用明细表'],
 ];

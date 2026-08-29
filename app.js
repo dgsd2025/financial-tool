@@ -1339,6 +1339,46 @@ function phase2(id) {
 
 /* ============ 路由 ============ */
 let CURD = 'home', CURS = 'home';
+/* 年月格式化。不能用 toISOString().slice(0,7) —— 它按 UTC 算，
+   东八区每月 1 号早上 8 点前会算成上个月。 */
+const ym = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+
+/* 可选期间：近 12 个月 + 下个月，再并上凭证库里真实出现过的期间
+   （导了去年的流水也能选到），倒序。 */
+function periodOptions() {
+  const set = new Set();
+  const now = new Date();
+  for (let i = -12; i <= 1; i++) set.add(ym(new Date(now.getFullYear(), now.getMonth() + i, 1)));
+  if (typeof vchLoad === 'function' && CUR_ENT) {
+    try { vchLoad(CUR_ENT).forEach(v => v.period && set.add(v.period)); } catch (e) { /* 忽略 */ }
+  }
+  if (typeof AC !== 'undefined' && AC.period) set.add(AC.period);
+  return [...set].sort().reverse();
+}
+/* 页内也要能选期间，和顶栏共用同一个 AC.period —— 选哪边都一样 */
+function perSelectHtml(id) {
+  const cur = typeof AC !== 'undefined' ? AC.period : '';
+  return `<select id="${id}" class="persel">${periodOptions().map(p =>
+    `<option value="${p}" ${p === cur ? 'selected' : ''}>${p}</option>`).join('')}</select>`;
+}
+/* 期间只在核算模块起作用（账簿按期间取数），别的模块藏起来，
+   免得摆一个点了没反应的控件。 */
+function renderPerBar() {
+  const bar = $('perBar'), sel = $('perSel');
+  if (!bar || !sel) return;
+  const on = CURD === 'close' && typeof AC !== 'undefined';
+  bar.style.display = on ? '' : 'none';
+  if (on) sel.innerHTML = periodOptions().map(p =>
+    `<option value="${p}" ${p === AC.period ? 'selected' : ''}>${p}</option>`).join('');
+}
+/* 改期间：顶栏和页内两处共用 */
+function setPeriod(v) {
+  if (typeof AC === 'undefined' || !v) return;
+  AC.period = v;
+  try { localStorage.setItem('fsc_ac_period', v); } catch (e) { /* 忽略 */ }
+  go(CURS);
+}
+
 function renderEntBar() {
   const sel = $('entSel'); if (!sel) return;
   sel.innerHTML = '<option value="">— 未选择 —</option>' + ENTITIES.map(e =>
@@ -1349,6 +1389,7 @@ function renderNav() {
     `<button data-d="${d.id}" class="${d.id === CURD ? 'on' : ''}">
       <span class="ic">${d.ic}</span>${d.n}${d.ready ? '' : '<span class="p2">二期</span>'}</button>`).join('');
   const d = DOMS.find(x => x.id === CURD);
+  renderPerBar();
   $('subNav').innerHTML = (d && d.items.length)
     ? d.items.map(it => it.length === 1
         ? `<span class="navgp">${H(it[0].slice(2))}</span>`
@@ -1627,6 +1668,7 @@ $('entSel').addEventListener('change', e => {
   T2.entId = id; T2.ent = ei ? ei.full : ''; T2.defProj = '';
   go(CURS);
 });
+$('perSel').addEventListener('change', e => setPeriod(e.target.value));
 $('filePick').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; });
 $('themeBtn').addEventListener('click', () => {
   const r = document.documentElement, cur = r.getAttribute('data-theme');
@@ -1652,7 +1694,6 @@ $('backPortal').addEventListener('click', e => {
 });
 
 /* 启动 */
-$('curPeriod').textContent = new Date().toISOString().slice(0, 7);
 try { useRuleSet(localStorage.getItem('fsc_cur_ent') || ''); } catch (e) { /* 忽略 */ }
 if (CUR_ENT) { const ei = ENTITIES.find(x => x.id === CUR_ENT); T2.entId = CUR_ENT; T2.ent = ei ? ei.full : ''; }
 go('home');

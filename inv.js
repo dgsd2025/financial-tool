@@ -478,7 +478,7 @@ S['iv-cit'] = () => {
     ]))
     + cardp('小微判定档案（三条件，缺一不可）', `<div class="cols c4">
         <div class="field"><label class="fl">从业人数（全年季度平均，人）</label>
-          <input type="number" step="1" id="citStaff" value="${sm.p.staff != null ? H(String(sm.p.staff)) : ''}" placeholder="如 23"></div>
+          <input type="number" step="0.01" id="citStaff" value="${sm.p.staff != null ? H(String(sm.p.staff)) : ''}" placeholder="如 23"></div>
         <div class="field"><label class="fl">资产总额（全年季度平均，万元）</label>
           <input type="number" step="0.01" id="citAssets" value="${sm.p.assets != null ? H(String(sm.p.assets)) : ''}" placeholder="如 7718.10"></div>
         <div class="note" style="margin:0;grid-column:span 2">判定 = 应纳税所得额 ≤300 万 <b>且</b> 人数 ≤300 <b>且</b> 资产 ≤5,000 万。
@@ -543,9 +543,10 @@ S['iv-cult'] = () => {
   const key = 'cult' + IV.month;
   const adj = ivAdj(key);
   const inc = numOf(adj.inc), freeInc = numOf(adj.freeInc), cut = numOf(adj.cut), pre = numOf(adj.pre);
+  const relief = numOf(adj.relief);
   const saleBase = Math.max(0, +(inc - cut).toFixed(2));
   const due = +(saleBase * IV_CULT_RATE).toFixed(2);
-  const pay = +(due - pre).toFixed(2);
+  const pay = +(due - relief - pre).toFixed(2);
   // 参考数：本月销项票价税合计 + 无票收入含税——计费收入是含税的全部价款和价外费用
   const out = ivLoad(IV_OUT_KEY(CUR_ENT)).filter(x => x.month === IV.month);
   const nv = ivLoad(IV_NOINV_KEY(CUR_ENT)).filter(x => x.month === IV.month);
@@ -553,13 +554,14 @@ S['iv-cult'] = () => {
   const inp = (k2, v, ph) => `<input type="number" step="0.01" data-cult="${k2}" value="${v || ''}" placeholder="${ph || '0.00'}" style="width:150px">`;
   const rows = [
     ['<span class="code">1</span> 应征增值税的广告/娱乐服务收入（含税）', inp('inc', adj.inc), money(inc)],
-    ['<span class="code">2</span> 免征增值税的收入', inp('freeInc', adj.freeInc), money(freeInc)],
+    ['<span class="code">2</span> 免征增值税的收入<div class="mut" style="font-size:11px">本草稿暂不计入计费基数——学习来源（星逸 2026-07）是零申报，验证不了该栏口径，以税局生成为准</div>', inp('freeInc', adj.freeInc), money(freeInc)],
     ['<span class="code">5</span> 本期减除额（付给其他广告公司/媒体的发布费）', inp('cut', adj.cut), money(cut)],
     ['<span class="code">8</span> 计费销售额（1−5）', '', money(saleBase)],
     ['<span class="code">9</span> 费率', '', '3%'],
     ['<span class="code">10</span> 应缴费额（8×9）', '', `<b>${money(due)}</b>`],
+    ['<span class="code">—</span> 减免费额（有减征优惠时手工填，以税局核定为准）', inp('relief', adj.relief), money(relief)],
     ['<span class="code">13</span> 本期预缴费额', inp('pre', adj.pre), money(pre)],
-    ['<span class="code">18</span> 本期应补（退）费额（10−13）', '', `<b>${money(pay)}</b>`],
+    ['<span class="code">18</span> 本期应补（退）费额（10−减免−13）', '', `<b>${money(pay)}</b>`],
   ];
   return head('文化事业建设费申报表（营改增）',
     `${H(entName())} · 费款所属期 ${IV.month}（按月）。广告服务、娱乐服务的缴纳人适用；<b>零申报也要按月报</b>（星逸 2026-07 真表就是零申报）。`, '纳税申报',
@@ -663,20 +665,24 @@ async function ivIitImport(file) {
     const iInc = cells.findIndex(c => c === '本期收入' || c.includes('本期收入'));
     if (iM < 0 || iInc < 0) { toast('没认出「税款所属期 / 本期收入」两列——请用自然人电子税务局导出的申报明细表', 5600); return; }
     const bym = {};
+    let skipped = 0;   // 月份认不出的行要报数——静默丢行会让金额偏小还没人知道
     rows.slice(hr + 1).forEach(r => {
-      const raw = String(r[iM] == null ? '' : r[iM]).trim().replace('-', '');
-      if (!/^\d{6}/.test(raw)) return;
+      const cell = String(r[iM] == null ? '' : r[iM]).trim();
+      if (!cell && !r.some(c => String(c == null ? '' : c).trim())) return;   // 整行空白不算
+      const raw = cell.replace(/[-/.]/g, '');
+      if (!/^\d{6}/.test(raw)) { if (cell) skipped++; return; }
       const mm = raw.slice(0, 4) + '-' + raw.slice(4, 6);
       const g = bym[mm] = bym[mm] || { n: 0, inc: 0 };
       g.n++; g.inc += numOf(r[iInc]);
     });
     const ks = Object.keys(bym).sort();
-    if (!ks.length) { toast('表里没读到申报数据行', 4200); return; }
+    if (!ks.length) { toast('表里没读到申报数据行——「税款所属期」列要形如 202607 或 2026-07', 5200); return; }
     const store = ivIitLoad();
     const at = new Date().toLocaleString('zh-CN');
     ks.forEach(m => { store[m] = { n: bym[m].n, inc: +bym[m].inc.toFixed(2), at, src: file.name }; });
     try { localStorage.setItem(IV_IIT_KEY(CUR_ENT), JSON.stringify(store)); } catch (e) { toast('保存失败：浏览器存储空间不足'); return; }
-    toast(`已导入 ${ks.length} 个月（${ks[0]} 〜 ${ks[ks.length - 1]}）的申报汇总，同月覆盖不叠加`, 5200);
+    toast(`已导入 ${ks.length} 个月（${ks[0]} 〜 ${ks[ks.length - 1]}）的申报汇总，同月覆盖不叠加`
+      + (skipped ? `；${skipped} 行月份没认出被跳过，金额可能偏小` : ''), skipped ? 6200 : 5200);
     go('iv-iit');
   } catch (e) { toast('读取失败：' + e.message, 4200); }
 }
@@ -700,14 +706,14 @@ S['iv-iit'] = () => {
      <button class="btn pri" data-act="ivIitUp">导入扣缴端明细表</button>`)
     + kpis([
       { k: '本月工资基数（账上）', v: money(w.total), t: 'g' },
-      { k: '扣缴端申报数（本期收入合计）', v: cur ? money(cur.inc) : '未导入', d: cur ? cur.n + ' 人' : '' },
+      { k: '扣缴端申报数（本期收入合计）', v: cur ? money(cur.inc) : '未导入', d: cur ? cur.n + ' 条记录' : '' },
       { k: '账-报差额', v: diff === null ? '—' : money(diff), t: diff === null ? '' : (Math.abs(diff) <= 1 ? 'g' : 'c') },
       { k: '其中：经计提（2211）', v: money(w.accrual) },
       { k: '未计提直发', v: money(w.direct) },
     ])
     + ivTieNote(w)
     + (cmpRows.length ? card('账 vs 报 · 逐月勾稽（差额 = 账上基数 − 申报合计）', table(
-      [{ t: '月份' }, { t: '申报人数', n: 1 }, { t: '申报「本期收入」合计', n: 1 }, { t: '账上工资基数', n: 1 }, { t: '差额', n: 1 }, { t: '来源文件' }], cmpRows))
+      [{ t: '月份' }, { t: '申报记录数', n: 1 }, { t: '申报「本期收入」合计', n: 1 }, { t: '账上工资基数', n: 1 }, { t: '差额', n: 1 }, { t: '来源文件' }], cmpRows))
       : `<div class="note"><b>还没导入扣缴端数据。</b>从自然人电子税务局（扣缴端）导出《综合所得预扣预缴申报明细表》
         （列含税款所属期/姓名/本期收入，如澳乐 2026-01〜07 那份），点右上角导入——只留按月汇总，不存逐人隐私明细。</div>`)
     + `<div class="note w"><b>差额怎么读：</b>正数 = 账上有工资没进申报（漏报或走了别的科目）；负数 = 申报了账上没有的
@@ -757,7 +763,7 @@ S['iv-dbf'] = () => {
     ])
     + cardp('计算（申报口径全用「上年」数——真表列名就是「上年在职职工…」）', `<div class="cols c4">
       <div class="field"><label class="fl">上年在职职工人数（年平均，可带小数）</label><input type="number" step="0.0001" id="dbfStaff" value="${adj.staff || ''}" placeholder="如 32.3333"></div>
-      <div class="field"><label class="fl">上年工资总额（默认取账上累计）</label><input type="number" step="0.01" id="dbfWage" value="${adj.wage || ''}" placeholder="${yWage.toFixed(2)}"></div>
+      <div class="field"><label class="fl">上年工资总额（留空=取本年账上累计，申报上年请自行填上年数）</label><input type="number" step="0.01" id="dbfWage" value="${adj.wage || ''}" placeholder="${yWage.toFixed(2)}"></div>
       <div class="field"><label class="fl">已安排残疾人就业人数</label><input type="number" step="0.01" id="dbfDisabled" value="${adj.disabled || ''}"></div>
       <div class="field"><label class="fl">年平均工资（超社平2倍时填封顶值）</label><input type="number" step="0.01" id="dbfAvg" value="${adj.avgWage || ''}" placeholder="${(staff ? wageTotal / staff : 0).toFixed(2)}"></div>
     </div>
@@ -959,25 +965,27 @@ document.addEventListener('click', e => {
     ivAdjSave(key, adj);
     const saleBase = Math.max(0, +((numOf(adj.inc) - numOf(adj.cut))).toFixed(2));
     const due = +(saleBase * IV_CULT_RATE).toFixed(2);
+    const dueNet = Math.max(0, +(due - numOf(adj.relief)).toFixed(2));   // 计提按扣减免后的实缴口径
     if (act === 'cultSave') { toast('已保存'); go('iv-cult'); return; }
     if (act === 'cultVch') {
       const memo = IV.month + ' 文化事业建设费计提';
       ivPushVoucher('__tax_cult_' + IV.month + '__', ivMonthEnd(IV.month), [
-        IVL('5403', '税金及附加', due, 0, memo),
-        IVL('222113', '应交税费_文化事业建设费', 0, due, memo)]);
+        IVL('5403', '税金及附加', dueNet, 0, memo),
+        IVL('222113', '应交税费_文化事业建设费', 0, dueNet, memo)]);
       return;
     }
     download(`文化事业建设费_${entName()}_${IV.month}.csv`, toCSV([
       ['栏次', '项目', '本期数'],
       ['1', '应征收入（含税）', numOf(adj.inc).toFixed(2)],
-      ['2', '免征收入', numOf(adj.freeInc).toFixed(2)],
+      ['2', '免征收入（暂不计入基数，以税局为准）', numOf(adj.freeInc).toFixed(2)],
       ['5', '本期减除额', numOf(adj.cut).toFixed(2)],
       ['8', '计费销售额', saleBase.toFixed(2)],
       ['9', '费率', '3%'],
       ['10', '应缴费额', due.toFixed(2)],
+      ['—', '减免费额', numOf(adj.relief).toFixed(2)],
       ['13', '本期预缴费额', numOf(adj.pre).toFixed(2)],
-      ['18', '本期应补（退）费额', (due - numOf(adj.pre)).toFixed(2)],
-    ])); toast('已导出');
+      ['18', '本期应补（退）费额', (due - numOf(adj.relief) - numOf(adj.pre)).toFixed(2)],
+    ])); toast('已导出'); go('iv-cult');
   } else if (act === 'ivExpVat') {
     const d = ivVatData();
     const rows = [...document.querySelectorAll('#view table tr')].map(tr => [...tr.children].map(td => td.textContent.trim()));

@@ -1,9 +1,19 @@
 /* 票据与纳税申报：进项票/销项票导入 + 无票收入 → 增值税申报表
-   → 所得税预缴申报表 → 印花税申报表。
+   → 所得税预缴申报表 → 印花税申报表 → 文化事业建设费 → 个税勾稽 → 残保金。
    口径要点（都在界面上明说，不藏）：
    - 每个主体有税务档案：小规模纳税人（征收率 1%/3%/5%）或一般纳税人（税率 13%/9%/6%）
    - 小规模月销售额 ≤10 万免征增值税；六税两费减半——按 2026 年现行政策预置，可关
-   - 申报表按税局样式列行次，但它是「草稿」：以电子税务局最终生成的为准 */
+   - 申报表按税局样式列行次，但它是「草稿」：以电子税务局最终生成的为准
+   口径来源（2026-08-29 批）：除增值税两张外，又学了 7 张真实税表——
+   - 残保金 2024 澳乐真表：分档减免（≥1% 减50% / <1% 减10% / ≤30人全免）、
+     平均工资有「社平 2 倍」封顶、人数按年平均可带小数
+   - 企税 A000000 澳乐 2025：小微三条件（所得≤300万+人数≤300+资产≤5000万），
+     澳乐资产均值 7,718 万 → 非小微按 25%
+   - 财行税 星逸 2025Q3：印花税实际走「财产和行为税合并申报」按季，零申报也报
+   - 文化事业建设费 星逸 2026-07：广告业按月 3%，零申报也报
+   - 车购税 澳乐 2025-03：一次性税种，新能源免税有每辆上限（2025 封顶 3 万）
+   - 财报报送 星逸 2025Q3：会小企 01/02 按季随申报报送，也是申报义务
+   - 个税明细 澳乐 2026-01~07：扣缴端逐人月报，是账上工资基数勾稽的另一头 */
 'use strict';
 
 /* ============ 存储 ============ */
@@ -399,6 +409,18 @@ S['iv-vat'] = () => {
 
 /* ============ 企业所得税季度预缴 ============ */
 /* 数据源两条路：本系统利润表（凭证库实时算）或导入利润表文件。 */
+/* 小微企业判定三条件（学自澳乐 2025 年 A000000 真表）：应纳税所得额≤300万
+   且 从业人数≤300 人 且 资产总额≤5,000 万（人数/资产按全年季度平均值）。
+   澳乐真表：资产均值 7,718.10 万超线 → 小型微利勾「否」、按 25%。
+   人数/资产存在税务档案里；没填时该条件不拦，但页面提示补齐。 */
+function ivCitSmall(taxable) {
+  const p = ivProf();
+  const has = v => v !== undefined && v !== null && v !== '' && !isNaN(+v);
+  const staffKo = has(p.staff) && +p.staff > 300;
+  const assetKo = has(p.assets) && +p.assets > 5000;
+  return { small: taxable <= 3000000 && !staffKo && !assetKo,
+    filled: has(p.staff) && has(p.assets), staffKo, assetKo, p };
+}
 S['iv-cit'] = () => {
   if (!CUR_ENT) return needEnt('企业所得税申报表');
   const q = ivQuarterOf(IV.month);
@@ -417,7 +439,8 @@ S['iv-cit'] = () => {
   }
   const loss = numOf(adj.loss);                       // 弥补以前年度亏损
   const taxable = Math.max(0, +(profit - loss).toFixed(2));
-  const small = taxable <= 3000000;                   // 小微：应纳税所得额≤300万 → 实际税负 5%
+  const sm = ivCitSmall(taxable);
+  const small = sm.small;
   const rate = small ? 0.05 : 0.25;
   const due = +(taxable * rate).toFixed(2);
   const paid = numOf(adj.paid);                       // 本年已预缴
@@ -453,7 +476,17 @@ S['iv-cit'] = () => {
       F('8　减：本年已预缴（手工）', `<input type="number" step="0.01" id="citPaid" value="${adj.paid || ''}" placeholder="0.00" style="width:130px">`),
       F('9　本期应补（退）所得税额', pay, 'sum'),
     ]))
-    + `<div class="note"><b>小微判定只看了「应纳税所得额 ≤300 万」一条。</b>从业人数 ≤300 人、资产总额 ≤5000 万这两条系统里没有数据，请自行确认符合，不符合就按 25% 报。</div>`;
+    + cardp('小微判定档案（三条件，缺一不可）', `<div class="cols c4">
+        <div class="field"><label class="fl">从业人数（全年季度平均，人）</label>
+          <input type="number" step="0.01" id="citStaff" value="${sm.p.staff != null ? H(String(sm.p.staff)) : ''}" placeholder="如 23"></div>
+        <div class="field"><label class="fl">资产总额（全年季度平均，万元）</label>
+          <input type="number" step="0.01" id="citAssets" value="${sm.p.assets != null ? H(String(sm.p.assets)) : ''}" placeholder="如 7718.10"></div>
+        <div class="note" style="margin:0;grid-column:span 2">判定 = 应纳税所得额 ≤300 万 <b>且</b> 人数 ≤300 <b>且</b> 资产 ≤5,000 万。
+          ${sm.filled ? (small ? '按当前档案：<b>符合小微</b>，实际税负 5%。' : `按当前档案：<b>不符合小微</b>（${sm.staffKo ? '人数超 300' : ''}${sm.staffKo && sm.assetKo ? '、' : ''}${sm.assetKo ? '资产超 5,000 万' : ''}${!sm.staffKo && !sm.assetKo ? '所得超 300 万' : ''}），按 25% 报。`)
+            : '<b>人数/资产还没填</b>，当前只按「所得 ≤300 万」判了——先把两个数补上（真实例：澳乐 2025 年 A000000 真表填资产均值 7,718.10 万、从业 23 人，资产超线 → 非小微按 25%）。'}
+          这两个数按主体存档，年度汇算 A000000 基础信息表也要填同口径的平均值。</div>
+      </div>`)
+    + `<div class="note w"><b>季度预缴之外还有年度汇算：</b>次年 5 月 31 日前做汇算清缴，随表报《企业所得税年度纳税申报基础信息表》（A000000，含资产总额/从业人数/行业/股东结构）。预缴按本页，多退少补在汇算。</div>`;
 };
 
 /* ============ 印花税申报表 ============ */
@@ -486,7 +519,7 @@ S['iv-stamp'] = () => {
       `<input type="number" step="0.01" data-stamp="${it[0]}" value="${adj[it[0]] || ''}" placeholder="0.00" style="width:150px">`,
       money(tax)];
   });
-  return head('印花税申报表', `${H(entName())} · 税款所属期 ${IV.month}。计税金额按合同/账簿实际填，右侧税额实时算${k === 0.5 ? '（小规模六税两费减半已含）' : ''}。`, '纳税申报',
+  return head('印花税申报表', `${H(entName())} · 税款所属期 ${IV.month}。计税金额按合同/账簿实际填，右侧税额实时算${k === 0.5 ? '（小规模六税两费减半已含）' : ''}。电子税务局里它走《财产和行为税纳税申报表》合并申报（星逸 2025Q3 真表：按季、买卖合同税目，<b>零申报也要报</b>）。`, '纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
      <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="stampSave">保存</button>
      <button class="btn" data-act="ivVchStamp">生成凭证</button>
@@ -498,6 +531,56 @@ S['iv-stamp'] = () => {
     ])
     + card('按税目填报', table([{ t: '税目' }, { t: '税率' }, { t: '计税金额', n: 1 }, { t: '应纳税额', n: 1 }], rows,
       ['<b>合计</b>', '', '', `<b>${money(+total.toFixed(2))}</b>`]));
+};
+
+/* ============ 文化事业建设费 ============ */
+/* 学自星逸文化 2026-07 真实申报表（营改增版）：广告服务、娱乐服务的缴纳人按月申报，
+   费率 3%，计费销售额 = 应征收入 − 本期减除额（广告业的减除额 = 付给其他广告公司
+   或媒体的广告发布费，凭合规凭证）。真表就是零申报——没有收入也要按月报。 */
+const IV_CULT_RATE = 0.03;
+S['iv-cult'] = () => {
+  if (!CUR_ENT) return needEnt('文化事业建设费');
+  const key = 'cult' + IV.month;
+  const adj = ivAdj(key);
+  const inc = numOf(adj.inc), freeInc = numOf(adj.freeInc), cut = numOf(adj.cut), pre = numOf(adj.pre);
+  const relief = numOf(adj.relief);
+  const saleBase = Math.max(0, +(inc - cut).toFixed(2));
+  const due = +(saleBase * IV_CULT_RATE).toFixed(2);
+  const pay = +(due - relief - pre).toFixed(2);
+  // 参考数：本月销项票价税合计 + 无票收入含税——计费收入是含税的全部价款和价外费用
+  const out = ivLoad(IV_OUT_KEY(CUR_ENT)).filter(x => x.month === IV.month);
+  const nv = ivLoad(IV_NOINV_KEY(CUR_ENT)).filter(x => x.month === IV.month);
+  const refGross = +(out.reduce((s, x) => s + (x.total || 0), 0) + nv.reduce((s, x) => s + (x.gross || 0), 0)).toFixed(2);
+  const inp = (k2, v, ph) => `<input type="number" step="0.01" data-cult="${k2}" value="${v || ''}" placeholder="${ph || '0.00'}" style="width:150px">`;
+  const rows = [
+    ['<span class="code">1</span> 应征增值税的广告/娱乐服务收入（含税）', inp('inc', adj.inc), money(inc)],
+    ['<span class="code">2</span> 免征增值税的收入<div class="mut" style="font-size:11px">本草稿暂不计入计费基数——学习来源（星逸 2026-07）是零申报，验证不了该栏口径，以税局生成为准</div>', inp('freeInc', adj.freeInc), money(freeInc)],
+    ['<span class="code">5</span> 本期减除额（付给其他广告公司/媒体的发布费）', inp('cut', adj.cut), money(cut)],
+    ['<span class="code">8</span> 计费销售额（1−5）', '', money(saleBase)],
+    ['<span class="code">9</span> 费率', '', '3%'],
+    ['<span class="code">10</span> 应缴费额（8×9）', '', `<b>${money(due)}</b>`],
+    ['<span class="code">—</span> 减免费额（有减征优惠时手工填，以税局核定为准）', inp('relief', adj.relief), money(relief)],
+    ['<span class="code">13</span> 本期预缴费额', inp('pre', adj.pre), money(pre)],
+    ['<span class="code">18</span> 本期应补（退）费额（10−减免−13）', '', `<b>${money(pay)}</b>`],
+  ];
+  return head('文化事业建设费申报表（营改增）',
+    `${H(entName())} · 费款所属期 ${IV.month}（按月）。广告服务、娱乐服务的缴纳人适用；<b>零申报也要按月报</b>（星逸 2026-07 真表就是零申报）。`, '纳税申报',
+    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
+     <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>
+     <button class="btn" data-act="cultSave">保存</button>
+     <button class="btn" data-act="cultVch">生成凭证</button>
+     <button class="btn pri" data-act="ivExpCult">导出</button>`)
+    + kpis([
+      { k: '计费销售额', v: money(saleBase) },
+      { k: '应缴费额（3%）', v: money(due), t: due ? 'w' : 'g' },
+      { k: '本期应补（退）', v: money(pay) },
+      { k: '参考：本月销项+无票（含税）', v: money(refGross) },
+    ])
+    + `<div class="note"><b>口径（星逸 2026-07 真表）：</b>计费收入按<b>含税</b>全部价款和价外费用填；
+      减除额是付给其他广告公司或媒体的广告发布费（要有合规凭证）。本月销项票+无票收入含税合计
+      ${money(refGross)} 供参考——只有其中广告/娱乐服务的部分才计费，其他业务收入不算。
+      计提分录：借 5403 税金及附加 / 贷 222113 应交税费_文化事业建设费。</div>`
+    + card('申报表（按税局栏次）', table([{ t: '栏次 · 项目' }, { t: '填报', n: 1 }, { t: '本期数', n: 1 }], rows));
 };
 
 /* ============ 电子税务局入口 ============ */
@@ -517,7 +600,20 @@ S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申�
     <a class="bank" href="https://www.gsxt.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#b02418">
       <span class="bi0">工</span><span class="bn">企业信用信息公示系统 <span class="bcnt">工商年报</span></span><span class="bu">www.gsxt.gov.cn</span></a>
   </div>`
-  + `<div class="note" style="margin-top:12px"><b>报税顺序建议：</b>票据导进销项票、录无票收入 → 增值税/印花税申报表核对生成凭证 → 所得税申报表 → 打开电子税务局照着草稿填 → 回凭证库把税费凭证过账。</div>`;
+  + `<div class="note" style="margin-top:12px"><b>报税顺序建议：</b>票据导进销项票、录无票收入 → 增值税/印花税申报表核对生成凭证 → 所得税申报表 → 打开电子税务局照着草稿填 → 回凭证库把税费凭证过账。</div>`
+  + card('申报义务全景（按真实税表整理 · 零申报也要按期报）', table(
+    [{ t: '申报事项' }, { t: '周期' }, { t: '期限' }, { t: '备注（口径来源）' }],
+    [
+      ['增值税及附加', '小规模按季 / 一般人按月', '期满次月（季后首月）15 日前', '优栖 2026Q1、优趣 2026-02 真表；季销 ≤30 万免征仍要报'],
+      ['个税（工资薪金预扣缴）', '按月', '次月 15 日前', '自然人电子税务局扣缴端逐人报；澳乐 2026-01〜07 真表，本系统做账-报勾稽'],
+      ['企业所得税预缴', '按季', '季后 15 日内', '小微三条件判定（澳乐 A000000：资产 7,718 万超线 → 25%）'],
+      ['企业所得税汇算 + A000000', '按年', '次年 5 月 31 日前', '随汇算报基础信息表（资产/人数/股东结构）'],
+      ['财产和行为税（含印花税）', '按季（税源采集后）', '季后 15 日内', '星逸 2025Q3 真表：买卖合同 0.3‰，合并申报、零申报也报'],
+      ['文化事业建设费', '按月', '次月 15 日前', '广告/娱乐服务适用，费率 3%（星逸 2026-07 真表，零申报）'],
+      ['财务报表报送（会小企 01/02）', '按季', '随季度申报', '小企业会计准则资产负债表+利润表（星逸 2025Q3 真表）'],
+      ['残保金', '按年', '广东：当年申报上年（澳乐 2024 年度 2025-11 受理）', '分档减免 10%/50%/100%，见残保金页'],
+      ['车购税', '一次性（购车时）', '购车之日起 60 日内', '澳乐 2025-03 真表：新能源免税有每辆上限（2025 封顶 3 万、超出照缴 22,141.59）；2026 年起政策以申报时为准'],
+    ]));
 
 /* ============ 个税 / 残保金申报 ============ */
 /* 社保不在这里办——公司用社保客户端申报，系统不做这块。
@@ -553,22 +649,95 @@ const ivTieNote = w => `<div class="note"><b>与三大报表的勾稽：</b>本�
   申报后生成的计提凭证回凭证库，自动进资产负债表（应交/应付）与利润表（费用）。只放官方
   chinatax.gov.cn 域名，别用搜索引擎搜申报入口。</div>`;
 
+/* 扣缴端申报数导入（学自澳乐 2026-01〜07 真实《综合所得预扣预缴申报明细表》）：
+   自然人电子税务局导出的明细逐人逐月，列含 税款所属期（202607）/姓名/所得项目/本期收入/…。
+   这里只按月汇总「人数 + 本期收入合计」留存，同月重复导入=覆盖；
+   逐人明细（姓名/证照号）不进 localStorage——系统没有员工档案，隐私数据不落盘。 */
+const IV_IIT_KEY = e => 'fsc_iv_iit_' + e + '_v1';
+function ivIitLoad() { try { return JSON.parse(localStorage.getItem(IV_IIT_KEY(CUR_ENT)) || '{}'); } catch (e) { return {}; } }
+async function ivIitImport(file) {
+  try {
+    toast('正在解析…');
+    const rows = await XLSXLite.readTable(file);
+    const hr = XLSXLite.findHeaderRow(rows, ['税款所属期', '姓名', '本期收入']);
+    const cells = (rows[hr] || []).map(c => String(c == null ? '' : c).replace(/\s/g, ''));
+    const iM = cells.findIndex(c => c.includes('税款所属期'));
+    const iInc = cells.findIndex(c => c === '本期收入' || c.includes('本期收入'));
+    if (iM < 0 || iInc < 0) { toast('没认出「税款所属期 / 本期收入」两列——请用自然人电子税务局导出的申报明细表', 5600); return; }
+    const bym = {};
+    let skipped = 0;   // 月份认不出的行要报数——静默丢行会让金额偏小还没人知道
+    rows.slice(hr + 1).forEach(r => {
+      const cell = String(r[iM] == null ? '' : r[iM]).trim();
+      if (!cell && !r.some(c => String(c == null ? '' : c).trim())) return;   // 整行空白不算
+      const raw = cell.replace(/[-/.]/g, '');
+      if (!/^\d{6}/.test(raw)) { if (cell) skipped++; return; }
+      const mm = raw.slice(0, 4) + '-' + raw.slice(4, 6);
+      const g = bym[mm] = bym[mm] || { n: 0, inc: 0 };
+      g.n++; g.inc += numOf(r[iInc]);
+    });
+    const ks = Object.keys(bym).sort();
+    if (!ks.length) { toast('表里没读到申报数据行——「税款所属期」列要形如 202607 或 2026-07', 5200); return; }
+    const store = ivIitLoad();
+    const at = new Date().toLocaleString('zh-CN');
+    ks.forEach(m => { store[m] = { n: bym[m].n, inc: +bym[m].inc.toFixed(2), at, src: file.name }; });
+    try { localStorage.setItem(IV_IIT_KEY(CUR_ENT), JSON.stringify(store)); } catch (e) { toast('保存失败：浏览器存储空间不足'); return; }
+    toast(`已导入 ${ks.length} 个月（${ks[0]} 〜 ${ks[ks.length - 1]}）的申报汇总，同月覆盖不叠加`
+      + (skipped ? `；${skipped} 行月份没认出被跳过，金额可能偏小` : ''), skipped ? 6200 : 5200);
+    go('iv-iit');
+  } catch (e) { toast('读取失败：' + e.message, 4200); }
+}
 S['iv-iit'] = () => {
   if (!CUR_ENT) return needEnt('个税申报');
   const w = ivWageBase(IV.month);
-  return head('个人所得税申报', `${H(entName())} · 税款所属期 ${IV.month}。逐人算税在自然人电子税务局扣缴端做，本页备账上底数与勾稽。`, '纳税申报',
-    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">`)
+  const store = ivIitLoad();
+  const cur = store[IV.month];
+  const diff = cur ? +(w.total - cur.inc).toFixed(2) : null;
+  const months = Object.keys(store).sort().reverse().slice(0, 12);
+  const cmpRows = months.map(m => {
+    const s = store[m];
+    const book = ivWageBase(m).total;
+    const d = +(book - s.inc).toFixed(2);
+    return [m, `<span class="mono">${s.n}</span>`, money(s.inc), money(book),
+      Math.abs(d) <= 1 ? `<span class="grn">${money(d)}</span>` : `<b class="red">${money(d)}</b>`,
+      `<span class="mut">${H(s.src || '')}</span>`];
+  });
+  return head('个人所得税申报', `${H(entName())} · 税款所属期 ${IV.month}。逐人算税在自然人电子税务局扣缴端做；本页做<b>账上基数 与 扣缴端申报数</b>的勾稽（申报明细表导入后逐月比对）。`, '纳税申报',
+    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
+     <button class="btn pri" data-act="ivIitUp">导入扣缴端明细表</button>`)
     + kpis([
       { k: '本月工资基数（账上）', v: money(w.total), t: 'g' },
+      { k: '扣缴端申报数（本期收入合计）', v: cur ? money(cur.inc) : '未导入', d: cur ? cur.n + ' 条记录' : '' },
+      { k: '账-报差额', v: diff === null ? '—' : money(diff), t: diff === null ? '' : (Math.abs(diff) <= 1 ? 'g' : 'c') },
       { k: '其中：经计提（2211）', v: money(w.accrual) },
       { k: '未计提直发', v: money(w.direct) },
     ])
     + ivTieNote(w)
-    + `<div class="note w"><b>申报口径提醒：</b>扣缴端里逐人的「本期收入」合计应与上面基数对得上；
-      对不上通常是有工资走了别的科目或月末没计提——先回凭证库补齐再申报。个税于次月 15 日前申报。</div>`
+    + (cmpRows.length ? card('账 vs 报 · 逐月勾稽（差额 = 账上基数 − 申报合计）', table(
+      [{ t: '月份' }, { t: '申报记录数', n: 1 }, { t: '申报「本期收入」合计', n: 1 }, { t: '账上工资基数', n: 1 }, { t: '差额', n: 1 }, { t: '来源文件' }], cmpRows))
+      : `<div class="note"><b>还没导入扣缴端数据。</b>从自然人电子税务局（扣缴端）导出《综合所得预扣预缴申报明细表》
+        （列含税款所属期/姓名/本期收入，如澳乐 2026-01〜07 那份），点右上角导入——只留按月汇总，不存逐人隐私明细。</div>`)
+    + `<div class="note w"><b>差额怎么读：</b>正数 = 账上有工资没进申报（漏报或走了别的科目）；负数 = 申报了账上没有的
+      （兼职/劳务没入账，或月末没计提）。差额超 1 元就该查。个税于次月 15 日前申报。</div>`
     + ivPortalCards(['its']);
 };
 
+/* 残保金计算（口径学自澳乐 2024 年真实缴费申报表，页面与凭证共用这一份）：
+   基数 = （上年在职职工人数×1.5% − 已安排残疾人数）× 上年职工年平均工资；
+   平均工资默认 = 工资总额÷人数，但真表按「当地社会平均工资 2 倍」封顶
+   （澳乐 2024：算术平均 73,133.90，实际按 36,292.00 计费）→ 给覆盖输入框；
+   人数按年平均、可带小数（真表 32.3333）。
+   减免分档（真表列 8 注「7×100%（或50%、10%）」）：
+   30 人及以下免 100%；安排比例 ≥1% 减 50%；不足 1%（含 0 人）减 10%。
+   澳乐 2024 验证：(32.3333×1.5%−0)×36,292.00 = 17,601.62，减 10% → 实缴 15,841.46 ✓ */
+function ivDbfCalc(staff, wageTotal, disabled, avgOverride) {
+  const avg = avgOverride > 0 ? avgOverride : (staff ? wageTotal / staff : 0);
+  const gap = Math.max(0, +(staff * 0.015 - disabled).toFixed(4));
+  const base = +(gap * avg).toFixed(2);
+  const ratio = staff ? disabled / staff : 0;
+  const reliefRate = (staff > 0 && staff <= 30) ? 1 : (ratio >= 0.01 ? 0.5 : 0.1);
+  const relief = +(base * reliefRate).toFixed(2);
+  return { avg, gap, base, reliefRate, relief, due: +(base - relief).toFixed(2) };
+}
 S['iv-dbf'] = () => {
   if (!CUR_ENT) return needEnt('残保金申报');
   const y = IV.month.slice(0, 4);
@@ -580,28 +749,30 @@ S['iv-dbf'] = () => {
   for (let m = 1; m <= +IV.month.slice(5, 7); m++) yWage += ivWageBase(y + '-' + String(m).padStart(2, '0')).total;
   const staff = +adj.staff || 0, disabled = +adj.disabled || 0;
   const wageTotal = +adj.wage || +yWage.toFixed(2);
-  const avg = staff ? wageTotal / staff : 0;
-  const gap = Math.max(0, +(staff * 0.015 - disabled).toFixed(2));
-  const exempt = staff > 0 && staff <= 30;   // 30 人及以下免征（现行政策）
-  const due = exempt ? 0 : +(gap * avg).toFixed(2);
-  return head('残疾人就业保障金申报', `${H(entName())} · ${y} 年度。按年申报（广东在电子税务局办），公式与减免按现行政策预置。`, '纳税申报',
+  const c = ivDbfCalc(staff, wageTotal, disabled, +adj.avgWage || 0);
+  const reliefName = c.reliefRate === 1 ? '免征（≤30人）' : c.reliefRate === 0.5 ? '减免 50%（安排≥1%）' : '减免 10%（安排不足1%）';
+  return head('残疾人就业保障金申报', `${H(entName())} · ${y} 年度。按年申报（广东在电子税务局办，费款所属期为上一年度、次年申报——澳乐 2024 年度真表是 2025-11 受理的）。`, '纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
      <button class="btn" data-act="dbfSave">保存</button>
      <button class="btn" data-act="dbfVch">生成计提凭证</button>`)
     + kpis([
-      { k: '应缴残保金', v: money(due), t: due ? 'w' : 'g' },
-      { k: '免征', v: exempt ? '是（≤30人）' : '否' },
+      { k: '本期应纳费额', v: money(c.base) },
+      { k: '减免', v: reliefName.replace(/（.*/, ''), d: reliefName.replace(/.*（|）/g, '') || '' },
+      { k: '本期应补（退）', v: money(c.due), t: c.due ? 'w' : 'g' },
       { k: '账上工资累计（1月至今）', v: money(+yWage.toFixed(2)) },
     ])
-    + cardp('计算（按上年口径申报时把三个数换成上年数）', `<div class="cols c4">
-      <div class="field"><label class="fl">在职职工人数</label><input type="number" id="dbfStaff" value="${adj.staff || ''}"></div>
-      <div class="field"><label class="fl">工资总额（默认取账上累计）</label><input type="number" step="0.01" id="dbfWage" value="${adj.wage || ''}" placeholder="${yWage.toFixed(2)}"></div>
+    + cardp('计算（申报口径全用「上年」数——真表列名就是「上年在职职工…」）', `<div class="cols c4">
+      <div class="field"><label class="fl">上年在职职工人数（年平均，可带小数）</label><input type="number" step="0.0001" id="dbfStaff" value="${adj.staff || ''}" placeholder="如 32.3333"></div>
+      <div class="field"><label class="fl">上年工资总额（留空=取本年账上累计，申报上年请自行填上年数）</label><input type="number" step="0.01" id="dbfWage" value="${adj.wage || ''}" placeholder="${yWage.toFixed(2)}"></div>
       <div class="field"><label class="fl">已安排残疾人就业人数</label><input type="number" step="0.01" id="dbfDisabled" value="${adj.disabled || ''}"></div>
-      <div class="field" style="display:flex;align-items:flex-end"><span class="mut">比例 1.5% · 年平均工资 ${money(+avg.toFixed(2))}</span></div>
-    </div>`)
-    + `<div class="note">公式：应缴 = （职工人数 × 1.5% − 已安排残疾人数）× 年平均工资；
-      30 人及以下免征（现行优惠，以申报年度政策为准）。工资总额默认取账上累计——这就是与利润表的勾稽，
-      改了要说得清差在哪。计提分录：借 5602 管理费用 / 贷 222111 应交税费_残保金。</div>`
+      <div class="field"><label class="fl">年平均工资（超社平2倍时填封顶值）</label><input type="number" step="0.01" id="dbfAvg" value="${adj.avgWage || ''}" placeholder="${(staff ? wageTotal / staff : 0).toFixed(2)}"></div>
+    </div>
+    <div class="mut" style="margin-top:8px">当前口径：比例 1.5% · 计费平均工资 ${money(+c.avg.toFixed(2))} · 缺口 ${c.gap} 人 · ${reliefName}</div>`)
+    + `<div class="note">公式（澳乐 2024 真表原样）：应纳 = （人数×1.5% − 已安排残疾人）× 年平均工资，
+      再按档减免——<b>30 人及以下全免；安排比例 ≥1% 减 50%；不足 1%（含 0 人）减 10%</b>。
+      平均工资超过当地社平 2 倍的按 2 倍封顶（澳乐 2024 按 36,292.00 计而非算术平均 73,133.90），封顶值以税局核定为准。
+      验证例：(32.3333×1.5%−0)×36,292.00=17,601.62，减 10% → 实缴 15,841.46。
+      计提分录：借 5602 管理费用 / 贷 222111 应交税费_残保金。</div>`
     + ivTieNote(w)
     + ivPortalCards(['etax']);
 };
@@ -668,7 +839,7 @@ function ivVchCit() {
   if ((adj.citSrc || 'book') === 'book') { profit = rptPlData(q.y + '-01-01', q.to + '-31').total; }
   else profit = numOf(adj.citProfit);
   const taxable = Math.max(0, +(profit - numOf(adj.loss)).toFixed(2));
-  const due = +(taxable * (taxable <= 3000000 ? 0.05 : 0.25)).toFixed(2);
+  const due = +(taxable * (ivCitSmall(taxable).small ? 0.05 : 0.25)).toFixed(2);
   const pay = Math.max(0, +(due - numOf(adj.paid)).toFixed(2));
   const memo = q.y + '年Q' + q.q + ' 企业所得税预缴计提';
   ivPushVoucher('__tax_cit_' + q.y + 'q' + q.q + '__', ivMonthEnd(q.to), [
@@ -704,6 +875,11 @@ document.addEventListener('change', e => {
     ivProfSave(p); go(CURS); return;
   }
   if (t.id === 'ivCarry') { const a = ivAdj(IV.month); a.carry = numOf(t.value); ivAdjSave(IV.month, a); go(CURS); return; }
+  if (t.id === 'citStaff' || t.id === 'citAssets') {
+    const p = ivProf();
+    p[t.id === 'citStaff' ? 'staff' : 'assets'] = t.value === '' ? '' : numOf(t.value);
+    ivProfSave(p); go(CURS); return;
+  }
   if (t.name === 'citSrc') {
     const q = ivQuarterOf(IV.month); const key = 'q' + q.y + q.q;
     const a = ivAdj(key); a.citSrc = t.value; ivAdjSave(key, a); go(CURS); return;
@@ -728,16 +904,14 @@ document.addEventListener('click', e => {
     const y = IV.month.slice(0, 4); const key = 'dbf' + y;
     const adj = ivAdj(key);
     adj.staff = numOf(($('dbfStaff') || {}).value); adj.wage = numOf(($('dbfWage') || {}).value);
-    adj.disabled = numOf(($('dbfDisabled') || {}).value);
+    adj.disabled = numOf(($('dbfDisabled') || {}).value); adj.avgWage = numOf(($('dbfAvg') || {}).value);
     ivAdjSave(key, adj);
     if (act === 'dbfSave') { toast('已保存'); go('iv-dbf'); return; }
-    // 与页面同一套公式重算应缴
+    // 与页面共用 ivDbfCalc，页面显示多少凭证就是多少
     let yWage = 0;
     for (let m = 1; m <= +IV.month.slice(5, 7); m++) yWage += ivWageBase(y + '-' + String(m).padStart(2, '0')).total;
     const staff = +adj.staff || 0, wageTotal = +adj.wage || +yWage.toFixed(2);
-    // 缺口人数保留两位小数——和页面同一口径，页面显示多少凭证就是多少
-    const gap = Math.max(0, +(staff * 0.015 - (+adj.disabled || 0)).toFixed(2));
-    const due = (staff > 0 && staff <= 30) ? 0 : +(gap * (staff ? wageTotal / staff : 0)).toFixed(2);
+    const due = ivDbfCalc(staff, wageTotal, +adj.disabled || 0, +adj.avgWage || 0).due;
     const memo = y + ' 年残保金计提';
     ivPushVoucher('__tax_dbf_' + y + '__', ivMonthEnd(IV.month), [
       IVL('5602', '管理费用', due, 0, memo),
@@ -751,6 +925,12 @@ document.addEventListener('click', e => {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.xlsx,.csv';
     inp.onchange = () => { if (inp.files[0]) ivDyImport(inp.files[0]); };
+    inp.click(); return;
+  }
+  if (act === 'ivIitUp') {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.xlsx,.csv';
+    inp.onchange = () => { if (inp.files[0]) ivIitImport(inp.files[0]); };
     inp.click(); return;
   }
   if (act === 'ivUpIn' || act === 'ivUpOut') {
@@ -779,6 +959,33 @@ document.addEventListener('click', e => {
     const key = 'st' + IV.month; const adj = ivAdj(key);
     document.querySelectorAll('[data-stamp]').forEach(el => { adj[el.dataset.stamp] = numOf(el.value); });
     ivAdjSave(key, adj); toast('印花税计税金额已保存'); go('iv-stamp');
+  } else if (act === 'cultSave' || act === 'cultVch' || act === 'ivExpCult') {
+    const key = 'cult' + IV.month; const adj = ivAdj(key);
+    document.querySelectorAll('[data-cult]').forEach(el => { adj[el.dataset.cult] = numOf(el.value); });
+    ivAdjSave(key, adj);
+    const saleBase = Math.max(0, +((numOf(adj.inc) - numOf(adj.cut))).toFixed(2));
+    const due = +(saleBase * IV_CULT_RATE).toFixed(2);
+    const dueNet = Math.max(0, +(due - numOf(adj.relief)).toFixed(2));   // 计提按扣减免后的实缴口径
+    if (act === 'cultSave') { toast('已保存'); go('iv-cult'); return; }
+    if (act === 'cultVch') {
+      const memo = IV.month + ' 文化事业建设费计提';
+      ivPushVoucher('__tax_cult_' + IV.month + '__', ivMonthEnd(IV.month), [
+        IVL('5403', '税金及附加', dueNet, 0, memo),
+        IVL('222113', '应交税费_文化事业建设费', 0, dueNet, memo)]);
+      return;
+    }
+    download(`文化事业建设费_${entName()}_${IV.month}.csv`, toCSV([
+      ['栏次', '项目', '本期数'],
+      ['1', '应征收入（含税）', numOf(adj.inc).toFixed(2)],
+      ['2', '免征收入（暂不计入基数，以税局为准）', numOf(adj.freeInc).toFixed(2)],
+      ['5', '本期减除额', numOf(adj.cut).toFixed(2)],
+      ['8', '计费销售额', saleBase.toFixed(2)],
+      ['9', '费率', '3%'],
+      ['10', '应缴费额', due.toFixed(2)],
+      ['—', '减免费额', numOf(adj.relief).toFixed(2)],
+      ['13', '本期预缴费额', numOf(adj.pre).toFixed(2)],
+      ['18', '本期应补（退）费额', (due - numOf(adj.relief) - numOf(adj.pre)).toFixed(2)],
+    ])); toast('已导出'); go('iv-cult');
   } else if (act === 'ivExpVat') {
     const d = ivVatData();
     const rows = [...document.querySelectorAll('#view table tr')].map(tr => [...tr.children].map(td => td.textContent.trim()));

@@ -41,28 +41,33 @@ function vchImport(entId, rows, srcName) {
 }
 
 /* ============ 账簿汇总（全部从凭证库实时算） ============ */
-/** 期间内的凭证，可选是否含未过账 */
-function vchIn(entId, period, includeUnposted) {
-  return vchLoad(entId).filter(v =>
-    (!period || v.period === period) && (includeUnposted || v.posted));
+/* 期间是日期区间（AC.from 〜 AC.to），按凭证日期取数。
+   老凭证可能只有 period 没有 date，回退到当月 1 号参与比较。 */
+const vDate = v => v.date || (v.period ? v.period + '-01' : '');
+/** 区间内的凭证，可选是否含未过账 */
+function vchIn(entId, from, to, includeUnposted) {
+  return vchLoad(entId).filter(v => {
+    const d = vDate(v);
+    return d >= from && d <= to && (includeUnposted || v.posted);
+  });
 }
-/** 期间之前的全部凭证（算期初用） */
-function vchBefore(entId, period, includeUnposted) {
+/** 区间起点之前的全部凭证（算期初用） */
+function vchBefore(entId, from, includeUnposted) {
   return vchLoad(entId).filter(v =>
-    v.period < period && (includeUnposted || v.posted));
+    vDate(v) < from && (includeUnposted || v.posted));
 }
 /** 科目余额：{acct:{name,期初借,期初贷,本期借,本期贷,本年借,本年贷}} */
-function acctBalance(entId, period, inc) {
-  const year = String(period).slice(0, 4);
+function acctBalance(entId, from, to, inc) {
+  const year = String(from).slice(0, 4);
   const m = {};
   const touch = a => (m[a] = m[a] || { acct: a, name: '', ob: 0, dr: 0, cr: 0, ydr: 0, ycr: 0 });
-  // 期初 = 本期之前所有发生额净额
-  vchBefore(entId, period, inc).forEach(v => v.lines.forEach(l => {
+  // 期初 = 区间起点之前所有发生额净额
+  vchBefore(entId, from, inc).forEach(v => v.lines.forEach(l => {
     const o = touch(l.acct); o.name = o.name || l.name;
     o.ob += (l.dr - l.cr);
-    if (String(v.period).slice(0, 4) === year) { o.ydr += l.dr; o.ycr += l.cr; }
+    if (vDate(v).slice(0, 4) === year) { o.ydr += l.dr; o.ycr += l.cr; }
   }));
-  vchIn(entId, period, inc).forEach(v => v.lines.forEach(l => {
+  vchIn(entId, from, to, inc).forEach(v => v.lines.forEach(l => {
     const o = touch(l.acct); o.name = o.name || l.name;
     o.dr += l.dr; o.cr += l.cr; o.ydr += l.dr; o.ycr += l.cr;
   }));
@@ -70,17 +75,17 @@ function acctBalance(entId, period, inc) {
   return m;
 }
 /** 明细账：某科目在期间内的逐笔 */
-function acctDetail(entId, acct, period, inc) {
-  const year = String(period).slice(0, 4);
+function acctDetail(entId, acct, from, to, inc) {
+  const year = String(from).slice(0, 4);
   let bal = 0, ydr = 0, ycr = 0;
-  vchBefore(entId, period, inc).forEach(v => v.lines.forEach(l => {
+  vchBefore(entId, from, inc).forEach(v => v.lines.forEach(l => {
     if (l.acct !== acct) return;
     bal += l.dr - l.cr;
-    if (String(v.period).slice(0, 4) === year) { ydr += l.dr; ycr += l.cr; }
+    if (vDate(v).slice(0, 4) === year) { ydr += l.dr; ycr += l.cr; }
   }));
   const rows = [];
   let dr = 0, cr = 0;
-  vchIn(entId, period, inc).forEach(v => v.lines.forEach(l => {
+  vchIn(entId, from, to, inc).forEach(v => v.lines.forEach(l => {
     if (l.acct !== acct) return;
     bal += l.dr - l.cr; dr += l.dr; cr += l.cr;
     rows.push({ date: v.date, vno: v.word + '-' + v.no, memo: l.memo, dr: l.dr, cr: l.cr, bal, opp: l.opp });
@@ -89,28 +94,36 @@ function acctDetail(entId, acct, period, inc) {
 }
 /** 总分类账：某科目按月 */
 function acctByMonth(entId, acct, year, inc) {
-  const all = vchLoad(entId).filter(v => (inc || v.posted) && String(v.period).slice(0, 4) === year);
+  const all = vchLoad(entId).filter(v => (inc || v.posted) && vDate(v).slice(0, 4) === year);
   const m = {};
   all.forEach(v => v.lines.forEach(l => {
     if (l.acct !== acct) return;
-    const k = v.period.slice(5, 7);
+    const k = vDate(v).slice(5, 7);
     const o = m[k] = m[k] || { dr: 0, cr: 0 };
     o.dr += l.dr; o.cr += l.cr;
   }));
   // 年初 = 该年之前的净额
   let ob = 0;
-  vchLoad(entId).forEach(v => { if ((inc || v.posted) && String(v.period).slice(0, 4) < year) v.lines.forEach(l => { if (l.acct === acct) ob += l.dr - l.cr; }); });
+  vchLoad(entId).forEach(v => { if ((inc || v.posted) && vDate(v).slice(0, 4) < year) v.lines.forEach(l => { if (l.acct === acct) ob += l.dr - l.cr; }); });
   let bal = ob;
   const rows = Object.keys(m).sort().map(k => { const o = m[k]; bal += o.dr - o.cr; return { mm: +k, dr: o.dr, cr: o.cr, bal }; });
   return { ob, rows, close: bal, tdr: rows.reduce((s, r) => s + r.dr, 0), tcr: rows.reduce((s, r) => s + r.cr, 0) };
 }
 
 /* ============ 状态 ============ */
+/* 默认区间 = 本月 1 号到月末。用 ym() 拼而不是 toISOString——后者按 UTC 算，
+   东八区每月 1 号早上 8 点前会算成上个月。记住上次选的区间。 */
+const _acRange = (() => {
+  try {
+    const s0 = localStorage.getItem('fsc_ac_range') || '';
+    if (/^\d{4}-\d{2}-\d{2}~\d{4}-\d{2}-\d{2}$/.test(s0)) return s0.split('~');
+  } catch (e) { /* 忽略 */ }
+  const n = new Date();
+  const last = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
+  return [ym(n) + '-01', ym(n) + '-' + String(last).padStart(2, '0')];
+})();
 const AC = {
-  // 记住上次选的期间；默认本月。用 ym() 而不是 toISOString——后者按 UTC 算，
-  // 东八区每月 1 号早上 8 点前会算成上个月。
-  period: (() => { try { return localStorage.getItem('fsc_ac_period') || ym(new Date()); }
-                   catch (e) { return ym(new Date()); } })(),
+  from: _acRange[0], to: _acRange[1],
   inc: 1,          // 是否含未过账凭证
   acct: '',        // 明细账/总分类账当前科目
   showZero: 0,     // 科目余额表是否显示无发生额科目
@@ -125,7 +138,7 @@ const absM = v => money(Math.abs(v));
 S['ac-vch'] = () => {
   if (!CUR_ENT) return needEnt('凭证库');
   const all = vchLoad(CUR_ENT);
-  const cur = all.filter(v => v.period === AC.period);
+  const cur = all.filter(v => { const d = vDate(v); return d >= AC.from && d <= AC.to; });
   const un = cur.filter(v => !v.posted).length;
   const rows = cur.slice(0, 300).map(v => {
     const dr = v.lines.reduce((s, l) => s + l.dr, 0);
@@ -139,7 +152,7 @@ S['ac-vch'] = () => {
     ];
   });
   return head('凭证库', `${H(entName())} · 账簿的唯一数据来源。<b>T2 生成的凭证在这里入库</b>，账簿与报表全部从这里实时汇总。`, '核算 · 链条起点',
-    `期间 ${perSelectHtml('acPerSel')}
+    `期间 ${acRangeHtml('ac')}
      <button class="btn" data-act="acPostAll">全部过账</button>
      <button class="btn pri" data-s="t2">去 T2 生成凭证</button>`)
     + kpis([
@@ -159,7 +172,7 @@ S['ac-vch'] = () => {
 /* ============ 科目余额表 ============ */
 S['ac-bal'] = () => {
   if (!CUR_ENT) return needEnt('科目余额表');
-  const m = acctBalance(CUR_ENT, AC.period, AC.inc);
+  const m = acctBalance(CUR_ENT, AC.from, AC.to, AC.inc);
   let list = Object.values(m).sort((a, b) => a.acct.localeCompare(b.acct));
   if (!AC.showZero) list = list.filter(o => o.dr || o.cr || Math.abs(o.ob) > 0.005 || Math.abs(o.eb) > 0.005);
   const T = { ob: 0, dr: 0, cr: 0, ydr: 0, ycr: 0, eb: 0 };
@@ -176,7 +189,7 @@ S['ac-bal'] = () => {
     `<button class="btn sm" data-acd="${H(o.acct)}">明细</button>`,
   ]);
   return head('科目余额表', `${H(entName())} · 期初、本期、本年累计、期末，四组借贷。`, '核算 · 账簿',
-    `期间 ${perSelectHtml('acPerSel')}
+    `期间 ${acRangeHtml('ac')}
      <button class="btn" data-act="acToggleZero">${AC.showZero ? '隐藏' : '显示'}无发生额</button>
      <button class="btn" data-act="acToggleInc">${AC.inc ? '含' : '不含'}未过账</button>
      <button class="btn pri" data-act="acExpBal">导出</button>`)
@@ -188,7 +201,7 @@ S['ac-bal'] = () => {
       { k: '含未过账', v: AC.inc ? '是' : '否', t: AC.inc ? 'w' : 'g' },
     ])
     + (bal ? '' : `<div class="note c"><b>本期借贷不平衡</b>，差额 ${money(T.dr - T.cr)}。凭证库里有不平的凭证，先去凭证库查。</div>`)
-    + (list.length ? card('科目余额表 · ' + AC.period, table(
+    + (list.length ? card('科目余额表 · ' + AC.from + ' 〜 ' + AC.to, table(
       [{ t: '科目编码' }, { t: '科目名称' }, { t: '期初借方', n: 1 }, { t: '期初贷方', n: 1 },
        { t: '本期借方', n: 1 }, { t: '本期贷方', n: 1 }, { t: '本年借方', n: 1 }, { t: '本年贷方', n: 1 },
        { t: '期末借方', n: 1 }, { t: '期末贷方', n: 1 }, { t: '' }], rows,
@@ -200,13 +213,13 @@ S['ac-bal'] = () => {
 /* ============ 明细账 ============ */
 S['ac-detail'] = () => {
   if (!CUR_ENT) return needEnt('明细账');
-  const m = acctBalance(CUR_ENT, AC.period, AC.inc);
+  const m = acctBalance(CUR_ENT, AC.from, AC.to, AC.inc);
   const accts = Object.values(m).sort((a, b) => a.acct.localeCompare(b.acct));
   if (!AC.acct && accts.length) AC.acct = accts[0].acct;
-  const d = AC.acct ? acctDetail(CUR_ENT, AC.acct, AC.period, AC.inc) : null;
+  const d = AC.acct ? acctDetail(CUR_ENT, AC.acct, AC.from, AC.to, AC.inc) : null;
   const nm = AC.acct ? (m[AC.acct] ? m[AC.acct].name : '') || acctName(AC.acct) : '';
   const rows = d ? [
-    { cls: 'sum', d: [AC.period + '-01', '', '<b>期初余额</b>', '', '', dirOf(d.open), `<b>${absM(d.open)}</b>`] },
+    { cls: 'sum', d: [AC.from, '', '<b>期初余额</b>', '', '', dirOf(d.open), `<b>${absM(d.open)}</b>`] },
   ].concat(d.rows.map(r => [
     r.date, `<span class="code">${H(r.vno)}</span>`, H(r.memo || ''),
     r.dr ? money(r.dr) : '', r.cr ? money(r.cr) : '', dirOf(r.bal), absM(r.bal),
@@ -216,7 +229,7 @@ S['ac-detail'] = () => {
   ]) : [];
   return head('明细账', `${H(entName())} · 三栏式，按科目逐笔。`, '核算 · 账簿',
     `<select id="acAcctSel">${accts.map(a => `<option value="${H(a.acct)}" ${a.acct === AC.acct ? 'selected' : ''}>${H(a.acct)} ${H(a.name || acctName(a.acct))}</option>`).join('')}</select>
-     期间 ${perSelectHtml('acPerSel')}
+     期间 ${acRangeHtml('ac')}
      <button class="btn pri" data-act="acExpDetail">导出</button>`)
     + (accts.length
       ? card(`明细账 · ${H(AC.acct)} ${H(nm)}`, table(
@@ -228,8 +241,8 @@ S['ac-detail'] = () => {
 /* ============ 总分类账 ============ */
 S['ac-gl'] = () => {
   if (!CUR_ENT) return needEnt('总分类账');
-  const year = AC.period.slice(0, 4);
-  const m = acctBalance(CUR_ENT, AC.period, AC.inc);
+  const year = AC.from.slice(0, 4);
+  const m = acctBalance(CUR_ENT, AC.from, AC.to, AC.inc);
   const accts = Object.values(m).sort((a, b) => a.acct.localeCompare(b.acct));
   if (!AC.acct && accts.length) AC.acct = accts[0].acct;
   const g = AC.acct ? acctByMonth(CUR_ENT, AC.acct, year, AC.inc) : null;
@@ -252,23 +265,23 @@ function acExport(kind) {
   if (!CUR_ENT) { toast('请先选主体'); return; }
   const en = entName();
   if (kind === 'bal') {
-    const m = acctBalance(CUR_ENT, AC.period, AC.inc);
+    const m = acctBalance(CUR_ENT, AC.from, AC.to, AC.inc);
     const hdr = ['主体', '期间', '科目编码', '科目名称', '期初借方', '期初贷方', '本期借方', '本期贷方', '本年借方', '本年贷方', '期末借方', '期末贷方'];
     const rows = Object.values(m).sort((a, b) => a.acct.localeCompare(b.acct)).map(o => [
-      en, AC.period, o.acct, o.name || acctName(o.acct),
+      en, AC.from + '~' + AC.to, o.acct, o.name || acctName(o.acct),
       o.ob > 0 ? o.ob.toFixed(2) : '', o.ob < 0 ? (-o.ob).toFixed(2) : '',
       o.dr.toFixed(2), o.cr.toFixed(2), o.ydr.toFixed(2), o.ycr.toFixed(2),
       o.eb > 0 ? o.eb.toFixed(2) : '', o.eb < 0 ? (-o.eb).toFixed(2) : '']);
-    download(`科目余额表_${AC.period}.csv`, toCSV([hdr].concat(rows)));
+    download(`科目余额表_${AC.from}_${AC.to}.csv`, toCSV([hdr].concat(rows)));
   } else if (kind === 'detail') {
-    const d = acctDetail(CUR_ENT, AC.acct, AC.period, AC.inc);
+    const d = acctDetail(CUR_ENT, AC.acct, AC.from, AC.to, AC.inc);
     const hdr = ['主体', '科目', '日期', '凭证字号', '摘要', '借方', '贷方', '方向', '余额'];
-    const rows = [[en, AC.acct, AC.period + '-01', '', '期初余额', '', '', dirOf(d.open), Math.abs(d.open).toFixed(2)]]
+    const rows = [[en, AC.acct, AC.from, '', '期初余额', '', '', dirOf(d.open), Math.abs(d.open).toFixed(2)]]
       .concat(d.rows.map(r => [en, AC.acct, r.date, r.vno, r.memo, r.dr ? r.dr.toFixed(2) : '', r.cr ? r.cr.toFixed(2) : '', dirOf(r.bal), Math.abs(r.bal).toFixed(2)]))
       .concat([[en, AC.acct, '', '', '本月合计', d.dr.toFixed(2), d.cr.toFixed(2), dirOf(d.close), Math.abs(d.close).toFixed(2)]]);
-    download(`明细账_${AC.acct}_${AC.period}.csv`, toCSV([hdr].concat(rows)));
+    download(`明细账_${AC.acct}_${AC.from}_${AC.to}.csv`, toCSV([hdr].concat(rows)));
   } else {
-    const year = AC.period.slice(0, 4);
+    const year = AC.from.slice(0, 4);
     const g = acctByMonth(CUR_ENT, AC.acct, year, AC.inc);
     const hdr = ['主体', '科目', '月份', '摘要', '借方', '贷方', '方向', '余额'];
     const rows = [[en, AC.acct, '', '年初余额', '', '', dirOf(g.ob), Math.abs(g.ob).toFixed(2)]]
@@ -297,7 +310,7 @@ document.addEventListener('click', e => {
   else if (act === 'acPostAll') {
     const list = vchLoad(CUR_ENT);
     let n = 0;
-    list.forEach(x => { if (x.period === AC.period && !x.posted) { x.posted = 1; n++; } });
+    list.forEach(x => { const d = vDate(x); if (d >= AC.from && d <= AC.to && !x.posted) { x.posted = 1; n++; } });
     vchSave(CUR_ENT, list); toast(`已过账 ${n} 张`); go('ac-vch');
   }
   else if (act === 'acExpBal') acExport('bal');
@@ -306,5 +319,4 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'acAcctSel') { AC.acct = e.target.value; go(CURS); }
-  if (e.target.id === 'acPerSel') setPeriod(e.target.value);
 });

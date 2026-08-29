@@ -1342,46 +1342,51 @@ let CURD = 'home', CURS = 'home';
    东八区每月 1 号早上 8 点前会算成上个月。 */
 const ym = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
 
-/* 可选期间：近 12 个月 + 下个月，再并上凭证库里真实出现过的期间
-   （导了去年的流水也能选到），倒序。 */
-function periodOptions() {
-  const set = new Set();
-  const now = new Date();
-  for (let i = -12; i <= 1; i++) set.add(ym(new Date(now.getFullYear(), now.getMonth() + i, 1)));
-  if (typeof vchLoad === 'function' && CUR_ENT) {
-    try { vchLoad(CUR_ENT).forEach(v => v.period && set.add(v.period)); } catch (e) { /* 忽略 */ }
-  }
-  if (typeof AC !== 'undefined' && AC.period) set.add(AC.period);
-  return [...set].sort().reverse();
+/* 期间 = 日期区间（年月日 〜 年月日）。系统只做 2026 年以后的账，
+   以前的不用（负责人拍板），所以下限钉死。 */
+const RANGE_MIN = '2026-01-01';
+/* 页内与顶栏共用同一个 AC.from/AC.to —— 改哪边都一样 */
+function acRangeHtml(pfx) {
+  if (typeof AC === 'undefined') return '';
+  return `<input type="date" id="${pfx}From" class="perin" value="${AC.from}" min="${RANGE_MIN}">`
+    + ` 〜 <input type="date" id="${pfx}To" class="perin" value="${AC.to}" min="${RANGE_MIN}">`;
 }
-/* 页内也要能选期间，和顶栏共用同一个 AC.period —— 选哪边都一样 */
-function perSelectHtml(id) {
-  const cur = typeof AC !== 'undefined' ? AC.period : '';
-  return `<select id="${id}" class="persel">${periodOptions().map(p =>
-    `<option value="${p}" ${p === cur ? 'selected' : ''}>${p}</option>`).join('')}</select>`;
-}
-/* 期间只在核算模块起作用（账簿按期间取数），别的模块藏起来，
+/* 期间只在核算模块起作用（账簿按区间取数），别的模块藏起来，
    免得摆一个点了没反应的控件。 */
 function renderPerBar() {
-  const bar = $('perBar'), sel = $('perSel');
-  if (!bar || !sel) return;
+  const bar = $('perBar'), box = $('perRange');
+  if (!bar || !box) return;
   const on = CURD === 'close' && typeof AC !== 'undefined';
   bar.style.display = on ? '' : 'none';
-  if (on) sel.innerHTML = periodOptions().map(p =>
-    `<option value="${p}" ${p === AC.period ? 'selected' : ''}>${p}</option>`).join('');
+  if (on) box.innerHTML = acRangeHtml('per');
 }
-/* 改期间：顶栏和页内两处共用 */
-function setPeriod(v) {
+/* 改区间的一端。k = 'from' | 'to'。起点晚于终点时把另一端拖齐，不无声吞掉 */
+function setRange(k, v) {
   if (typeof AC === 'undefined' || !v) return;
-  AC.period = v;
-  try { localStorage.setItem('fsc_ac_period', v); } catch (e) { /* 忽略 */ }
+  if (v < RANGE_MIN) { toast('系统只做 2026 年以后的账'); v = RANGE_MIN; }
+  AC[k] = v;
+  if (AC.to < AC.from) AC[k === 'from' ? 'to' : 'from'] = v;
+  try { localStorage.setItem('fsc_ac_range', AC.from + '~' + AC.to); } catch (e) { /* 忽略 */ }
   go(CURS);
 }
 
 function renderEntBar() {
-  const sel = $('entSel'); if (!sel) return;
-  sel.innerHTML = '<option value="">— 未选择 —</option>' + ENTITIES.map(e =>
-    `<option value="${e.id}" ${CUR_ENT === e.id ? 'selected' : ''}>${H(entShort(e))}${loadRSet(e.id) ? '' : ' ·无规则'}</option>`).join('');
+  const inp = $('entSel'), dl = $('entOpts'); if (!inp || !dl) return;
+  // datalist 在 Chrome 里按子串过滤，敲「云帕」就能筛出来——这就是模糊查找
+  dl.innerHTML = ENTITIES.map(e =>
+    `<option value="${H(e.full)}">${loadRSet(e.id) ? '' : '无规则'}</option>`).join('');
+  const cur = ENTITIES.find(e => e.id === CUR_ENT);
+  if (document.activeElement !== inp) inp.value = cur ? cur.full : '';
+}
+/* 把用户敲的字解析成主体：先全等，再子串。命中多个不猜，让用户再补几个字 */
+function resolveEnt(txt) {
+  const t = String(txt || '').trim();
+  if (!t) return { empty: 1 };
+  const exact = ENTITIES.find(e => e.full === t);
+  if (exact) return { hit: exact };
+  const hits = ENTITIES.filter(e => e.full.includes(t));
+  if (hits.length === 1) return { hit: hits[0] };
+  return hits.length ? { multi: hits.length } : { none: 1 };
 }
 function renderNav() {
   $('domNav').innerHTML = DOMS.map(d =>
@@ -1661,13 +1666,19 @@ document.addEventListener('click', e => {
 });
 
 $('entSel').addEventListener('change', e => {
-  const id = e.target.value;
-  useRuleSet(id);
-  const ei = ENTITIES.find(x => x.id === id);
-  T2.entId = id; T2.ent = ei ? ei.full : ''; T2.defProj = '';
+  const r = resolveEnt(e.target.value);
+  if (r.empty) { useRuleSet(''); T2.entId = ''; T2.ent = ''; go(CURS); return; }
+  if (r.multi) { toast(`「${e.target.value.trim()}」匹配到 ${r.multi} 个主体，再多打几个字`); return; }
+  if (r.none) { toast('没找到这个主体'); renderEntBar(); return; }
+  useRuleSet(r.hit.id);
+  T2.entId = r.hit.id; T2.ent = r.hit.full; T2.defProj = '';
+  renderEntBar();
   go(CURS);
 });
-$('perSel').addEventListener('change', e => setPeriod(e.target.value));
+document.addEventListener('change', e => {
+  if (e.target.id === 'perFrom' || e.target.id === 'acFrom') setRange('from', e.target.value);
+  else if (e.target.id === 'perTo' || e.target.id === 'acTo') setRange('to', e.target.value);
+});
 $('filePick').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; });
 $('themeBtn').addEventListener('click', () => {
   const r = document.documentElement, cur = r.getAttribute('data-theme');

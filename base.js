@@ -106,7 +106,7 @@ S['bs-acct'] = () => {
     ];
   });
   return head('科目设置', `${H(entName())} · 与核算模块同一份科目：小企业会计准则标准表 + 本主体自建。编码级次 4-2-2（一级4位/二级6位/三级8位）。`, '基础 · 科目',
-    `<button class="btn" data-act="bsImpGo">导入科目余额表</button>
+    `<button class="btn" data-go="bs-imp">主数据导入（科目余额表/辅助核算）</button>
      <button class="btn pri" data-act="bsExp">导出科目表</button>`)
     + kpis([
       { k: '科目总数', v: String(rows.length), u: '个' },
@@ -127,19 +127,6 @@ document.addEventListener('change', e => {
     BSS.parent = e.target.value;
     const c = $('bsCode'); if (c && BSS.parent) c.value = bsNextCode(BSS.parent);
   }
-  if (e.target.id === 'bsiFile' && e.target.files && e.target.files[0]) { bsiLoad(e.target.files[0]); return; }
-  if (e.target.id === 'bsiHead' && BSI.rows) {
-    BSI.headRow = +e.target.value;
-    const c = bsiCompose(BSI.rows, BSI.headRow);
-    BSI.dataFrom = c.dataFrom; BSI.header = c.header; BSI.map = bsiMap(c.header);
-    go('bs-imp'); return;
-  }
-  if (e.target.dataset && e.target.dataset.bsimap && BSI.rows) {
-    const k = e.target.dataset.bsimap;
-    if (e.target.value === '') delete BSI.map[k]; else BSI.map[k] = +e.target.value;
-    go('bs-imp'); return;
-  }
-  if (e.target.id === 'bsiWipe') { BSI.wipe = e.target.checked ? 1 : 0; return; }
 });
 document.addEventListener('click', e => {
   const sub = e.target.closest('[data-bssub]');
@@ -197,22 +184,6 @@ document.addEventListener('click', e => {
     saveRSet(CUR_ENT, RS);
     toast(`已新增 ${code} ${name}`); go('bs-acct'); return;
   }
-  if (act.dataset.act === 'bsImpGo') { go('bs-imp'); return; }
-  if (act.dataset.act === 'bsImpBack') { go('bs-acct'); return; }
-  if (act.dataset.act === 'bsImpCancel') { Object.assign(BSI, { rows: null, map: {}, fileName: '' }); go('bs-imp'); return; }
-  if (act.dataset.act === 'bsImpApply') { bsiApply(); return; }
-  if (act.dataset.act === 'bsImpTpl') {
-    download('科目余额表导入模板.csv', toCSV([
-      ['科目编码', '科目名称', '期初余额借方', '期初余额贷方'],
-      ['1002', '银行存款', '', ''],
-      ['100201', '银行存款_工行基本户', '130547.25', ''],
-      ['100202', '银行存款_建行一般户', '50000.00', ''],
-      ['2202', '应付账款', '', ''],
-      ['220201', '应付账款_供应商A', '', '80000.00'],
-      ['3104', '利润分配_未分配利润', '', '100547.25'],
-    ]));
-    toast('模板已下载（也可直接用用友/金蝶导出的原表）'); return;
-  }
   if (act.dataset.act === 'bsExp') {
     const rows = [['编码', '名称', '类别', '余额方向', '级次', '辅助核算', '来源', '状态']];
     ACCOUNTS(1).filter(a => !String(a[0]).includes('{')).forEach(a => {
@@ -225,257 +196,6 @@ document.addEventListener('click', e => {
     download(`科目表_${entName()}.csv`, toCSV(rows)); toast('已导出');
   }
 });
-
-/* ============ 科目余额表导入（建科目 + 录期初，一个文件两件事） ============ */
-/* 用友/金蝶导出的科目余额表丢进来：先把系统没有的一/二/三级科目补建好，
-   再把期初余额写进期初凭证（__ob__，核算模块那张）。口径约束：
-   - 只认 4-2-2 级次（与本系统一致）；其它级次（用友可配 4-3-3）如实列为问题行，不硬转
-   - 一级科目允许补建（编码 1-5 开头才收——准则表没配齐的行业科目能进来）
-   - 期初余额只导「末级」行：上级行是汇总数，导了会和下级双计；
-     文件里上级 ≠ 下级合计的地方如实提示（多半是源表筛过行）
-   - 金蝶常见的两行表头（「期初余额」跨列 + 下行「借方/贷方」）自动合成
-   - 只读「期初/年初」列，绝不碰「本期发生/期末」列——期末数导进期初是灾难 */
-const BSI = { rows: null, headRow: 0, dataFrom: 1, map: {}, fileName: '', wipe: 1 };
-const BSI_ALIAS = {
-  code: ['科目编码', '科目代码', '科目编号', '编码', '代码'],
-  name: ['科目名称', '科目全称', '科目全名', '科目名', '名称'],
-  dr: ['期初余额借方', '期初借方', '借方期初余额', '借方期初', '年初余额借方', '年初借方'],
-  cr: ['期初余额贷方', '期初贷方', '贷方期初余额', '贷方期初', '年初余额贷方', '年初贷方'],
-  dir: ['余额方向', '借贷方向', '方向', '借或贷'],
-  bal: ['期初余额', '年初余额', '期初金额'],
-};
-/* 金蝶两行表头合成：顶行「期初余额」（合并单元格导出后右边是空）+ 下行「借方/贷方」
-   → 拼成「期初余额借方 / 期初余额贷方」。空顶格沿用左边最近的非空值。 */
-function bsiCompose(rows, h) {
-  const top = rows[h] || [], sub = rows[h + 1] || [];
-  const subCells = sub.map(c => String(c == null ? '' : c).replace(/\s|　/g, ''));
-  // 含纯数字格的行是数据行不是子表头——方向列的数据值恰好叫「借方」时别误吞第一行数据
-  const isSub = subCells.some(c => c === '借方' || c === '贷方')
-    && !subCells.some(c => c.includes('科目'))
-    && !subCells.some(c => /^\d+(\.\d+)?$/.test(c));
-  if (!isSub) return { header: top.map(c => String(c == null ? '' : c)), dataFrom: h + 1 };
-  let carry = '';
-  const header = top.map((c, i) => {
-    const t = String(c == null ? '' : c).trim();
-    if (t) carry = t;
-    return (t || carry) + (subCells[i] || '');
-  });
-  return { header, dataFrom: h + 2 };
-}
-function bsiMap(header) {
-  const cells = header.map(c => String(c == null ? '' : c).replace(/\s|　/g, ''));
-  const bad = /发生|期末|本年|累计|本期/;   // 这些列长得像但绝不能要
-  const map = {};
-  const pick = (k, aliases) => {
-    for (const exact of [1, 0]) {
-      for (let i = 0; i < cells.length; i++) {
-        if (Object.values(map).includes(i) || !cells[i]) continue;
-        if (!aliases.some(a => (exact ? cells[i] === a : cells[i].includes(a)))) continue;
-        if (k !== 'code' && k !== 'name' && k !== 'dir' && bad.test(cells[i])) continue;
-        map[k] = i; return;
-      }
-    }
-  };
-  pick('code', BSI_ALIAS.code); pick('name', BSI_ALIAS.name);
-  pick('dr', BSI_ALIAS.dr); pick('cr', BSI_ALIAS.cr);
-  pick('dir', BSI_ALIAS.dir); pick('bal', BSI_ALIAS.bal);
-  // 简版表兜底：整表没有任何期初/年初字样时，裸「借方/贷方」也认（仍躲开发生/期末列）
-  if (map.dr === undefined && map.bal === undefined) pick('dr', ['借方']);
-  if (map.cr === undefined && map.bal === undefined) pick('cr', ['贷方']);
-  return map;
-}
-async function bsiLoad(file) {
-  try {
-    // RS（科目集）必须是当前主体的——外部脚本或异常路径改了 CUR_ENT 没重载 RS 时，
-    // 「科目已存在」的判定会拿别的主体的科目表判，期初凭证名称也会写错
-    if (CUR_ENT && typeof useRuleSet === 'function') useRuleSet(CUR_ENT);
-    toast('正在解析…');
-    const rows = await XLSXLite.readTable(file);
-    const hr = XLSXLite.findHeaderRow(rows, BSI_ALIAS.code.concat(BSI_ALIAS.name));
-    const c = bsiCompose(rows, hr);
-    Object.assign(BSI, { rows, headRow: hr, dataFrom: c.dataFrom, map: bsiMap(c.header), fileName: file.name, header: c.header });
-    go('bs-imp');
-    toast(`读到 ${rows.length} 行，表头定在第 ${hr + 1} 行`);
-  } catch (e) { toast('读取失败：' + e.message, 4200); }
-}
-/* 预览与导入共用一份计划——两边算法永远一致 */
-function bsiPlan() {
-  const out = { create: [], balLines: [], skipParentBal: [], skipOldDesc: [], badLevel: [], noParent: [], renamed: [],
-    dup: 0, sumWarn: [], tdr: 0, tcr: 0, rows: 0, negFixed: 0, skipDr: 0, skipCr: 0 };
-  if (!BSI.rows || BSI.map.code === undefined) return out;
-  const im = BSI;
-  const seen = new Map();
-  im.rows.slice(im.dataFrom).forEach(r => {
-    const g = i => (i === undefined ? '' : String(r[i] == null ? '' : r[i]).trim());
-    const rawCode = g(im.map.code).replace(/\s|　/g, '');
-    if (!rawCode) return;
-    const name = g(im.map.name).replace(/\s|　/g, '') || '（未命名）';
-    if (!/^\d+$/.test(rawCode)) {
-      if (!/合计|总计/.test(rawCode + name)) out.badLevel.push({ code: rawCode, name, why: '编码含非数字' });
-      return;
-    }
-    if (![4, 6, 8].includes(rawCode.length)) {
-      out.badLevel.push({ code: rawCode, name, why: `级次不是 4-2-2（${rawCode.length} 位）` }); return;
-    }
-    let dr = 0, cr = 0;
-    if (im.map.bal !== undefined && im.map.dr === undefined) {
-      const v = numOf(g(im.map.bal));
-      if (/贷/.test(g(im.map.dir))) cr = v; else dr = v;
-    } else {
-      dr = numOf(g(im.map.dr)); cr = numOf(g(im.map.cr));
-    }
-    // 负数按会计惯例转对方向（用友红字）
-    if (dr < 0) { cr += -dr; dr = 0; out.negFixed++; }
-    if (cr < 0) { dr += -cr; cr = 0; out.negFixed++; }
-    dr = +dr.toFixed(2); cr = +cr.toFixed(2);
-    if (seen.has(rawCode)) { out.dup++; return; }
-    seen.set(rawCode, { code: rawCode, name, dr, cr });
-  });
-  const codes = new Set(seen.keys());
-  const sorted = [...seen.values()].sort((a, b) => a.code.length - b.code.length || a.code.localeCompare(b.code));
-  const willCreate = new Set();
-  sorted.forEach(x => {
-    const exist = bsFind(x.code);
-    if (exist) {
-      if (x.name !== '（未命名）' && String(exist[1]).replace(/\s|　/g, '') !== x.name) {
-        out.renamed.push({ code: x.code, sys: exist[1], file: x.name });
-      }
-      return;
-    }
-    if (x.name === '（未命名）') { out.badLevel.push({ code: x.code, name: x.name, why: '要新建但缺科目名称' }); return; }
-    if (x.code.length === 4) {
-      if (!/^[1-5]/.test(x.code)) { out.badLevel.push({ code: x.code, name: x.name, why: '一级编码不是 1-5 开头' }); return; }
-      willCreate.add(x.code); out.create.push(x); return;
-    }
-    const parent = x.code.slice(0, -2);
-    if (!bsFind(parent) && !willCreate.has(parent)) { out.noParent.push(x); return; }
-    willCreate.add(x.code); out.create.push(x);
-  });
-  const blocked = new Set(out.noParent.map(x => x.code).concat(out.badLevel.map(x => x.code)));
-  // 「上级汇总行」= 文件里有它的可导后代（任意层级；被拒的后代不算——后代不导时上级就是末级）
-  const hasLiveDescInFile = c => { for (const k of codes) { if (k.length > c.length && k.startsWith(c) && !blocked.has(k)) return true; } return false; };
-  // wipe=0 合并模式：旧期初里保留下来（本表没覆盖）的下级行，会和本行按前缀汇总双计
-  const oldLines = (!BSI.wipe && typeof obGet === 'function') ? ((obGet(CUR_ENT) || {}).lines || []) : [];
-  const hasKeptOldDesc = c => oldLines.some(l => { const a = String(l.acct); return a.length > c.length && a.startsWith(c) && !codes.has(a); });
-  const skip = (x, bucket) => { bucket.push(x); out.skipDr = +(out.skipDr + x.dr).toFixed(2); out.skipCr = +(out.skipCr + x.cr).toFixed(2); };
-  sorted.forEach(x => {
-    if (!x.dr && !x.cr) return;
-    if (blocked.has(x.code)) return;                        // 建不了的科目，余额也不导
-    if (hasLiveDescInFile(x.code)) { skip(x, out.skipParentBal); return; }   // 文件内的上级汇总行
-    if (hasKeptOldDesc(x.code)) { skip(x, out.skipOldDesc); return; }
-    out.balLines.push(x);
-    out.tdr = +(out.tdr + x.dr).toFixed(2); out.tcr = +(out.tcr + x.cr).toFixed(2);
-  });
-  // 表内勾稽：上级行的数 vs 文件内直接下级合计，对不上说明源表被筛过行
-  const hasDirectChild = c => { for (const k of codes) { if (k.length === c.length + 2 && k.startsWith(c)) return true; } return false; };
-  sorted.forEach(p => {
-    if (!hasDirectChild(p.code) || (!p.dr && !p.cr)) return;
-    let sdr = 0, scr = 0;
-    seen.forEach(k => { if (k.code.length === p.code.length + 2 && k.code.startsWith(p.code)) { sdr += k.dr; scr += k.cr; } });
-    if (Math.abs(sdr - p.dr) > 0.01 || Math.abs(scr - p.cr) > 0.01) out.sumWarn.push({ code: p.code, name: p.name });
-  });
-  out.rows = seen.size;
-  return out;
-}
-function bsiApply() {
-  if (CUR_ENT && typeof useRuleSet === 'function') useRuleSet(CUR_ENT);   // 同 bsiLoad：落库前再对一次表
-  const p = bsiPlan();
-  if (!p.create.length && !p.balLines.length) { toast('这张表没有可导入的科目或期初余额'); return; }
-  if (!RS) RS = initRSet(CUR_ENT);
-  p.create.forEach(x => { RS.accounts.push([x.code, x.name]); });
-  if (p.create.length) saveRSet(CUR_ENT, RS);
-  let obNote = '';
-  if (p.balLines.length && typeof obGet === 'function') {
-    const old = obGet(CUR_ENT);
-    let lines = BSI.wipe ? [] : (old ? old.lines.slice() : []);
-    // 合并模式下：本次导入行的祖先旧行也要清——留着会和新明细按前缀汇总双计
-    const touched = new Set(p.balLines.map(x => x.code));
-    const anc = new Set();
-    p.balLines.forEach(x => { for (let c = x.code.slice(0, -2); c.length >= 4; c = c.slice(0, -2)) anc.add(c); });
-    const clearedAnc = lines.filter(l => anc.has(String(l.acct)) && !touched.has(String(l.acct))).length;
-    lines = lines.filter(l => !touched.has(String(l.acct)) && !anc.has(String(l.acct)));
-    p.balLines.forEach(x => { lines.push({ acct: x.code, name: acctName(x.code), dr: x.dr, cr: x.cr, memo: '期初余额' }); });
-    const list = vchLoad(CUR_ENT).filter(v => v.id !== OB_ID);
-    if (lines.length) list.unshift({ id: OB_ID, period: '2025-12', date: '2025-12-31', word: '期初', no: '0', posted: 1, src: '科目余额表导入', lines });
-    // 保存失败绝不能报成功——科目此时已建好，把实情说清并保留预览现场，腾出空间可直接重试
-    if (!vchSave(CUR_ENT, list)) {
-      toast(`期初凭证没存进去（浏览器存储空间不足）。科目已建好 ${p.create.length} 个；清理空间后再点一次「确认导入」即可补上期初。`, 8000);
-      return;
-    }
-    const d = +(lines.reduce((s, l) => s + l.dr - l.cr, 0)).toFixed(2);
-    obNote = (Math.abs(d) > 0.005 ? `；期初借贷差 ${money(d)}，报表中心会拦到录平为止` : '；期初借贷平衡')
-      + (clearedAnc ? `；另清掉 ${clearedAnc} 条旧的上级汇总行（防止与新明细双计）` : '');
-  }
-  Object.assign(BSI, { rows: null, map: {}, fileName: '' });
-  toast(`导入完成：新建科目 ${p.create.length} 个、期初余额 ${p.balLines.length} 条${obNote}`, 6200);
-  go(p.balLines.length ? 'ac-open' : 'bs-acct');
-}
-S['bs-imp'] = () => {
-  if (!CUR_ENT) return needEnt('导入科目余额表');
-  const tools = `<button class="btn" data-act="bsImpBack">← 返回科目设置</button>
-     <button class="btn" data-act="bsImpTpl">下载模板</button>`;
-  if (!BSI.rows) {
-    return head('导入科目余额表', '用友/金蝶导出的科目余额表丢进来，<b>建科目 + 录期初一次完成</b>。', '基础 · 科目', tools)
-      + cardp('选择文件', `<input type="file" id="bsiFile" accept=".xlsx,.csv,.txt">
-        <div class="note" style="margin-top:11px"><b>表里至少要有「科目编码」和「科目名称」两列</b>；期初余额认
-          「期初/年初余额 借方、贷方」两列式，或「期初余额 + 方向」单列式，金蝶的两行表头自动识别。
-          只读期初列，<b>本期发生额、期末余额一概不碰</b>。</div>
-        <div class="note"><b>导入规则：</b>系统没有的一/二/三级科目自动补建（编码必须是 4-2-2 级次）；
-          期初余额只取<b>末级科目</b>行——上级行是汇总数，由下级自动汇总，导了会双计。
-          已存在的科目不重建、不改名（名称不同会提示）。</div>`);
-  }
-  const p = bsiPlan();
-  const mv = Object.values(BSI.map);
-  const clash = mv.length !== new Set(mv).size;   // 手动映射把两个字段指到同一列：金额会翻倍还看着平衡
-  const noDir = BSI.map.bal !== undefined && BSI.map.dr === undefined && BSI.map.dir === undefined;
-  const ready = BSI.map.code !== undefined && !clash
-    && (BSI.map.dr !== undefined || BSI.map.bal !== undefined || BSI.map.cr !== undefined);
-  const header = BSI.header || [];
-  const fields = [['code', '科目编码', 1], ['name', '科目名称', 1], ['dr', '期初借方', 0], ['cr', '期初贷方', 0], ['bal', '期初余额（单列式）', 0], ['dir', '余额方向（单列式）', 0]];
-  const opts = k => header.map((h, j) => `<option value="${j}" ${BSI.map[k] === j ? 'selected' : ''}>第${j + 1}列 ${H(String(h || '(空)').slice(0, 16))}</option>`).join('');
-  const mapRows = fields.map(([k, n, must]) => [
-    H(n) + (must ? ' <span class="red">*</span>' : ''),
-    `<select data-bsimap="${k}"><option value="">— 不使用 —</option>${opts(k)}</select>`,
-  ]);
-  const headOpts = BSI.rows.slice(0, Math.min(BSI.rows.length, 12)).map((r, i) =>
-    `<option value="${i}" ${i === BSI.headRow ? 'selected' : ''}>第 ${i + 1} 行：${H(r.filter(Boolean).slice(0, 4).join(' | ').slice(0, 46))}</option>`).join('');
-  const cut = (arr, n) => arr.slice(0, n).map(x => `${H(x.code)} ${H(x.name)}`).join('、') + (arr.length > n ? ` … 等 ${arr.length} 个` : '');
-  const diff = +(p.tdr - p.tcr).toFixed(2);
-  return head('导入科目余额表', `${H(BSI.fileName)} · ${BSI.rows.length} 行 · 主体 ${H(entName())}`, '基础 · 科目', tools)
-    + cardp('表头在第几行', `<select id="bsiHead" style="min-width:340px">${headOpts}</select>
-      <span class="mut" style="margin-left:8px">金蝶两行表头（期初余额+借方/贷方）已自动合成</span>`)
-    + card('列对应关系', table([{ t: '字段' }, { t: '对应哪一列' }], mapRows))
-    + (ready ? kpis([
-      { k: '有效科目行', v: String(p.rows), u: '个' },
-      { k: '将新建科目', v: String(p.create.length), u: '个', t: p.create.length ? 'g' : '' },
-      { k: '将写期初余额', v: String(p.balLines.length), u: '条', t: p.balLines.length ? 'g' : '' },
-      { k: '期初借方合计', v: money(p.tdr) },
-      { k: '期初贷方合计', v: money(p.tcr) },
-      { k: '借贷差额', v: money(diff), t: Math.abs(diff) < 0.005 ? 'g' : 'c' },
-    ]) : (clash ? '<div class="note c"><b>还不能继续：两个字段指到了同一列</b>——检查上面的列对应关系，每列只能用一次。</div>'
-      : '<div class="note c"><b>还不能继续：</b>「科目编码」必须对应上，且期初余额至少认出一列（借方/贷方或单列+方向）。</div>'))
-    + (ready && noDir ? `<div class="note c"><b>只映了「期初余额」单列、没映「余额方向」列</b>——所有金额会按借方处理，负债和权益类将全部错向。表里有方向列就映上；确实全是借方余额才继续。</div>` : '')
-    + (ready && p.create.length ? `<div class="note g"><b>将新建 ${p.create.length} 个科目：</b>${cut(p.create, 10)}</div>` : '')
-    + (ready && p.renamed.length ? `<div class="note w"><b>${p.renamed.length} 个科目已存在但名称不同，不改名：</b>${
-        p.renamed.slice(0, 5).map(x => `${H(x.code)} 系统「${H(x.sys)}」/ 表里「${H(x.file)}」`).join('；')}${p.renamed.length > 5 ? ' …' : ''}</div>` : '')
-    + (ready && p.skipParentBal.length ? `<div class="note"><b>${p.skipParentBal.length} 行是上级汇总行，余额不导</b>（表里有它的下级明细行，金额由下级导入）：${cut(p.skipParentBal, 6)}</div>` : '')
-    + (ready && p.skipOldDesc.length ? `<div class="note w"><b>${p.skipOldDesc.length} 行跳过：原有期初里已有这些科目的下级金额</b>（本表没覆盖到），一起导会双计。想以本表为准，勾选下面「清空原有期初后写入」再确认：${cut(p.skipOldDesc, 6)}</div>` : '')
-    + (ready && (p.skipDr > 0.005 || p.skipCr > 0.005) ? `<div class="note"><b>跳过行的金额合计：借 ${money(p.skipDr)} / 贷 ${money(p.skipCr)}</b>——它们不在上面的借贷合计里，核对总数时记得加回去看。</div>` : '')
-    + (ready && p.sumWarn.length ? `<div class="note c"><b>表内勾稽对不上 ${p.sumWarn.length} 处</b>（上级行 ≠ 下级合计，源表可能筛过行，导完请核对）：${
-        p.sumWarn.slice(0, 5).map(x => H(x.code) + ' ' + H(x.name)).join('、')}</div>` : '')
-    + (ready && p.noParent.length ? `<div class="note c"><b>${p.noParent.length} 个科目找不到上级，跳过</b>（上级既不在系统也不在表里）：${cut(p.noParent, 6)}</div>` : '')
-    + (ready && p.badLevel.length ? `<div class="note c"><b>${p.badLevel.length} 行编码不合规，跳过：</b>${
-        p.badLevel.slice(0, 5).map(x => `${H(x.code)}（${H(x.why)}）`).join('；')}${p.badLevel.length > 5 ? ' …' : ''}</div>` : '')
-    + (ready && p.dup ? `<div class="note w"><b>表里有 ${p.dup} 行重复编码</b>，只取第一次出现的。</div>` : '')
-    + (ready && p.negFixed ? `<div class="note w"><b>${p.negFixed} 行余额是负数</b>，已按会计惯例转到对方向。</div>` : '')
-    + cardp('期初写入方式', `<label style="font-size:12px"><input type="checkbox" id="bsiWipe" ${BSI.wipe ? 'checked' : ''}>
-        以这张表为准，<b>清空原有期初后写入</b>（不勾 = 只覆盖表里出现的科目，其余保留）</label>
-      <div class="note" style="margin-top:9px">期初进的是核算模块那张「期初凭证」（2025-12-31），科目余额表/资产负债表年初数/明细账全部自动生效。重复导同一张表结果一致，不会翻倍。</div>`)
-    + `<div style="display:flex;gap:9px;justify-content:flex-end;margin-top:6px">
-        <button class="btn" data-act="bsImpCancel">换个文件</button>
-        <button class="btn pri" data-act="bsImpApply" ${ready && (p.create.length || p.balLines.length) ? '' : 'disabled'}>确认导入</button>
-      </div>`;
-};
 
 /* ============ 客户 / 供应商维护 ============ */
 /* 按主体各存各的（垂直下放）。这是 科目设置 里「客户/供应商」辅助核算的名册。
@@ -940,12 +660,18 @@ function mdiApply() {
           posted: 1, src: '主数据导入', lines: p.ytd });
         nYtd = p.ytd.length;
       }
-      vchSave(CUR_ENT, list);
+      // 保存失败绝不能报成功——vchSave 自己的失败 toast 会被后面的成功 toast 顶掉
+      if (!vchSave(CUR_ENT, list)) { MDI.saveFail = 1; return; }
       done.push('科目余额表');
       nFile++;
     }
   });
 
+  if (MDI.saveFail) {
+    MDI.saveFail = 0;
+    toast('系统凭证没存进去（浏览器存储空间不足）。凭证之前的部分已导入；清理空间后再点一次「全部导入」即可补上（重复导入不会翻倍）。', 8000);
+    return;   // 保留文件清单，腾出空间可直接重试
+  }
   MDI.files = [];
   toast(`${nFile} 份导入完成：科目 ${nAcct} 个、辅助核算 ${nAux} 条、年初 ${nOb} 行、本年累计 ${nYtd} 行`, 5200);
   go('bs-imp');

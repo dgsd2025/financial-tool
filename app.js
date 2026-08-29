@@ -55,7 +55,10 @@ const DOMS = [
       ['tool-list', '我的工具'], ['t1', 'T1 资金日报'], ['t2', 'T2 流水转凭证'], ['t3', 'T3 对账核对'], ['t4', 'T4 日损益'],
       ['tool-rules', '规则库'], ['tool-log', '处理记录'], ['tool-plan', '开发排期'] ] },
   { id: 'fund', n: '资金', ic: '◈', items: [['p-fund-daily', '资金日报'], ['p-fund-account', '账户与U盾'], ['p-fund-recon', '流水与对账'], ['p-pay', '付款申请']] },
-  { id: 'inv', n: '票据', ic: '▼', items: [['p-inv-in', '进项票池'], ['p-inv-out', '销项开票']] },
+  { id: 'inv', n: '票据', ic: '▼', ready: 1, items: [
+      ['iv-in', '进项票'], ['iv-out', '销项票'], ['iv-noinv', '无票收入'],
+      ['--纳税申报'],
+      ['iv-vat', '增值税申报'], ['iv-cit', '所得税申报'], ['iv-stamp', '印花税申报'] ] },
   { id: 'ar', n: '应收', ic: '◫', items: [['p-ar-contract', '合同台账'], ['p-ar-bill', '应收账单'], ['p-ar-claim', '收款认领'], ['p-ar-aging', '账龄与催收']] },
   { id: 'cost', n: '费控', ic: '▧', items: [['p-exp', '报销与费控'], ['p-flow', '审批路由']] },
   { id: 'close', n: '核算', ic: '▩', ready: 1, items: [
@@ -1306,8 +1309,6 @@ const PHASE2 = {
   'p-fund-account': ['账户与U盾', 'M2', '账户台账、U 盾领用登记、持盾人与知密人分权'],
   'p-fund-recon': ['流水与对账', 'M2', '银企互联取流水、自动勾对、差异标红'],
   'p-pay': ['付款申请', 'M4', '钉钉电子流、权限自动路由、三单匹配'],
-  'p-inv-in': ['进项票池', 'M1', '数字账户直连取票、按合同号打标、查重'],
-  'p-inv-out': ['销项开票', 'M1', '应收账单自动触发开票'],
   'p-ar-contract': ['合同台账', 'M3', '对接智慧园区系统自动同步'],
   'p-ar-bill': ['应收账单', 'M3', '合同驱动按月自动生成应收'],
   'p-ar-claim': ['收款认领', 'M3', '流水按规则自动匹配应收'],
@@ -1427,6 +1428,7 @@ function renderNav() {
 function go(id) {
   if (/^t[1234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
   else if (id.startsWith('ac-') || id.startsWith('rp-')) CURD = 'close';
+  else if (id.startsWith('iv-')) CURD = 'inv';
   else {
     const d = DOMS.find(x => x.items.some(i => i.length > 1 && i[0] === id) || x.id === id);
     if (d) CURD = d.id;

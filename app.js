@@ -105,6 +105,16 @@ const ENTITIES = [
   { id: 'e37', full: '中山市木同日用品有限公司', line: '' },
 ];
 
+/** 从法人全称提取简称：去地区前缀、去括号、去常见后缀 */
+function entShort(e) {
+  if (e.short) return e.short;
+  let s = String(e.full || '');
+  s = s.replace(/^(广州市|广州|深圳市|深圳|海南|中山市|东莞市)/, '');
+  s = s.replace(/（[^）]*）|\([^)]*\)/g, '');
+  s = s.replace(/(有限合伙|合伙企业|有限责任公司|有限公司|Limited|Ltd\.?)$/i, '');
+  s = s.replace(/(电子商务科技|电子商务|供应链服务|供应链管理|物业管理服务|服务管理|管理咨询|新媒体科技|生物科技|文化传播|智能科技|婴童用品|儿童用品|母婴用品|日用品|数码贸易|农业发展|产业园运营|运营管理|技术|贸易|文化|玩具|商贸|投资|企业管理)$/, '');
+  return s.trim() || e.full;
+}
 const LINES = ['电商', '集包', '物业收租', '手机租赁', '出租屋', '设备租赁', '塑料制造'];
 
 /* ============ 规则集（按主体） ============ */
@@ -181,15 +191,64 @@ const RS_YOUQI = {
     { kw: '手续费|汇费|工本费|短信费|账户管理费|年费', dir: 'out', acct: '560303_{p}', memo: '银行手续费' },
   ],
 };
+/* 通用科目模板 —— 新主体起步用，之后按各自真账增删 */
+const ACC_TPL = [
+  ['1001', '库存现金'],
+  ['100201', '银行存款_基本户'],
+  ['100202', '银行存款_一般户'],
+  ['1122', '应收账款'],
+  ['1221', '其他应收款'],
+  ['1123', '预付账款'],
+  ['2202', '应付账款'],
+  ['2203', '预收账款'],
+  ['2241', '其他应付款'],
+  ['221101', '应付职工薪酬_工资'],
+  ['222112', '应交税费_应交个人所得税'],
+  ['22210107', '应交税费_应交增值税_销项税额'],
+  ['5001', '主营业务收入'],
+  ['5051', '其他业务收入'],
+  ['5401', '主营业务成本'],
+  ['5402', '其他业务成本'],
+  ['560202', '管理费用_房租'],
+  ['560204', '管理费用_水电费'],
+  ['560206', '管理费用_清洁费'],
+  ['560209', '管理费用_工资'],
+  ['560223', '管理费用_服务费'],
+  ['5602', '管理费用_办公费'],
+  ['5601', '销售费用'],
+  ['560303', '财务费用_手续费'],
+  ['560302', '财务费用_利息'],
+];
+
 /* 其余主体尚无规则集——它们业务不同（电商、集包、塑料制造），
    规则要各自从真账里学，不能套用优栖这套。 */
 const RULE_SETS = { youqi: RS_YOUQI };
 
-/* 当前生效的规则集（随 T2 选的主体切换） */
+/* 用户自建/改过的规则集存本地，覆盖内置预设 */
+const RSET_KEY = e => 'fsc_t2_rset_' + e + '_v1';
+function loadRSet(entId) {
+  try { const s = JSON.parse(localStorage.getItem(RSET_KEY(entId)) || 'null'); if (s) return s; }
+  catch (e) { /* 忽略 */ }
+  return RULE_SETS[entId] || null;
+}
+function saveRSet(entId, set) {
+  try { localStorage.setItem(RSET_KEY(entId), JSON.stringify(set)); }
+  catch (e) { toast('规则集保存失败'); }
+}
+/** 给还没有规则集的主体开一个空的，之后可自己加科目、加规则 */
+function initRSet(entId) {
+  const set = { projects: [], accounts: [], owners: {}, ownerAcct: '', ownerMemo: '', rules: [] };
+  saveRSet(entId, set); return set;
+}
+
+/* 当前主体与其规则集（全局上下文，顶栏可切） */
+let CUR_ENT = '';
 let RS = null;
 function useRuleSet(entId) {
-  RS = RULE_SETS[entId] || null;
-  RULES = RS ? loadRules(entId) : [];
+  CUR_ENT = entId || '';
+  RS = entId ? loadRSet(entId) : null;
+  RULES = (entId && RS) ? loadRules(entId) : [];
+  try { localStorage.setItem('fsc_cur_ent', CUR_ENT); } catch (e) { /* 忽略 */ }
   return RS;
 }
 /** 主体自带的默认项目（用户可在步骤 2 改） */
@@ -242,7 +301,7 @@ function loadRules(entId) {
     const s = localStorage.getItem(RULE_KEY(entId));
     if (s) return JSON.parse(s);
   } catch (e) { /* 忽略 */ }
-  const set = RULE_SETS[entId];
+  const set = loadRSet(entId);
   if (!set) return [];
   const init = set.rules.map(r => Object.assign({ id: uid(), hits: 0, src: '预置' }, r));
   saveRules(entId, init); return init;
@@ -649,16 +708,36 @@ S['tool-plan'] = () => {
 
 /* 规则库界面 */
 S['tool-rules'] = () => {
-  if (!RS) {
-    const withRules = ENTITIES.filter(e => RULE_SETS[e.id]);
+  if (!CUR_ENT) {
     return head('规则库', '规则库<b>按主体隔离</b>——不同主体业务不同，共用一套规则必然记错账。', '工具箱 · T2')
-      + `<div class="note"><b>请先选主体。</b>下面是已有规则库的主体，点进去查看；其余主体的规则要各自从真账里学。</div>`
-      + `<div class="tgrid">${withRules.map(e => `<button class="tcard" data-useent="${e.id}">
-          <span class="tc-h"><span class="tc-n">${H(e.full)}</span><span class="tc-sp"></span>
-          <span class="tc-sv">${RULE_SETS[e.id].rules.length}<small> 条</small></span></span>
-          <span class="tc-d">${H(e.line)} · ${RULE_SETS[e.id].projects.length} 个项目</span></button>`).join('')}</div>`
-      + `<div class="note w"><b>其余 ${ENTITIES.length - withRules.length} 个主体暂无规则库。</b>
-         电商、集包、塑料制造的业务与出租屋完全不同，规则不能套用——需要各自提供一期真实凭证来学。</div>`;
+      + `<div class="note"><b>请先在顶栏选一个主体。</b>选好之后在这里维护它的科目表与规则。</div>`
+      + `<div class="tgrid">${ENTITIES.map(e => { const s = loadRSet(e.id); return `
+          <button class="tcard ${s ? '' : 'soon'}" data-useent="${e.id}">
+          <span class="tc-h"><span class="tc-n">${H(entShort(e))}</span><span class="tc-sp"></span>
+          <span class="tc-sv">${s ? s.rules.length : 0}<small> 条规则</small></span></span>
+          <span class="tc-d">${H(e.full)}</span>
+          <span class="tc-m">${e.line ? `<span class="tc-tag">${H(e.line)}</span>` : ''}
+          ${s ? `<span class="tc-tag">${s.accounts.length} 科目</span>` : pill('未建规则集', 'mu')}</span></button>`; }).join('')}</div>`;
+  }
+  const curEnt0 = ENTITIES.find(e => e.id === CUR_ENT);
+  if (!RS) {
+    return head('规则库 · ' + (curEnt0 ? curEnt0.full : ''), '这个主体还没有规则集。', '工具箱 · T2',
+      `<button class="btn" data-useent="">换主体</button>`)
+      + `<div class="note"><b>先建科目表，再建规则。</b>规则的本质是「什么样的流水 → 记哪个科目」，没有科目表就无从建起。</div>`
+      + `<div class="cols c2">
+        ${cardp('从通用模板起步（推荐）', `<div style="font-size:12.5px;line-height:1.8">
+          套用 ${ACC_TPL.length} 个常用科目（现金、银行存款、往来、收入成本、三大费用），
+          再按贵司实际增删。</div>
+          <button class="btn pri" style="margin-top:11px" data-act="useTpl">套用通用科目模板</button>`)}
+        ${cardp('从别的主体复制', `<div style="font-size:12.5px;line-height:1.8">
+          业务相近的主体可以直接复制它的科目表与规则，再改。</div>
+          <div style="margin-top:11px;display:flex;gap:7px;flex-wrap:wrap">
+          ${ENTITIES.filter(e => e.id !== CUR_ENT && loadRSet(e.id)).map(e =>
+            `<button class="btn" data-copyfrom="${e.id}">复制「${H(entShort(e))}」</button>`).join('') || '<span class="mut">还没有别的主体建过</span>'}
+          </div>`)}
+      </div>`
+      + `<div class="note w"><b>也可以空手起步：</b>直接去 T2 处理例外，在科目框旁边点 <b>+</b> 一个个加——
+         处理完一批流水，科目表和规则库就同时长出来了。<b>这是最贴合实际的方式。</b></div>`;
   }
   const rows = RULES.map(r => [
     `<span class="code">${H(r.kw.length > 26 ? r.kw.slice(0, 26) + '…' : r.kw)}</span>`,
@@ -670,6 +749,9 @@ S['tool-rules'] = () => {
     `<button class="btn sm" data-delrule="${r.id}">删除</button>`
   ]);
   const curEnt = ENTITIES.find(e => e.id === T2.entId);
+  const accRows = ACCOUNTS().map((a, i) => [
+    `<span class="code">${H(a[0])}</span>`, H(a[1]),
+    `<button class="btn sm" data-delacct="${i}">删除</button>`]);
   return head('规则库 · ' + (curEnt ? curEnt.full : ''),
     '摘要关键词 → 会计科目。每处理一次例外就可以存成规则，规则库越养越准。<b>规则按主体隔离</b>。', '工具箱 · T2',
     `<button class="btn" data-act="exportRules">导出规则</button><button class="btn pri" data-act="addRule">+ 新增规则</button>`)
@@ -681,7 +763,13 @@ S['tool-rules'] = () => {
     ])
     + `<div class="note"><b>规则匹配顺序：</b>从上到下，命中第一条即停。所以<b>越具体的规则要放越前面</b>。新增规则默认插在最前。</div>`
     + card('规则列表', table(
-      [{ t: '关键词（正则）' }, { t: '方向' }, { t: '科目' }, { t: '凭证摘要' }, { t: '命中', n: 1 }, { t: '来源' }, { t: '' }], rows));
+      [{ t: '关键词（正则）' }, { t: '方向' }, { t: '科目' }, { t: '凭证摘要' }, { t: '命中', n: 1 }, { t: '来源' }, { t: '' }], rows))
+    + card(`科目表（${ACCOUNTS().length} 个）`, accRows.length
+        ? table([{ t: '编码' }, { t: '名称' }, { t: '' }], accRows)
+        : `<div style="padding:20px;text-align:center;color:var(--text-3)">还没有科目</div>`,
+      `<button class="btn" data-act="useTpl">套用通用模板</button><button class="btn pri" data-act="addAcct">+ 新增科目</button>`)
+    + `<div class="note"><b>规则依赖科目表。</b>科目表里没有的科目，处理例外时选不到。
+       建议顺序：先把常用科目建齐，再在处理例外时把「这类流水 → 这个科目」存成规则。</div>`;
 };
 
 S['tool-log'] = () => {
@@ -1072,14 +1160,21 @@ function t2Step4() {
   const rows = ex.map((r, i) => [
     r.no, r.date || '<span class="red">缺失</span>', H(r.memo.slice(0, 28)), H(r.opp.slice(0, 14)),
     r.dir === 'in' ? pill('收', 'ok') : pill('付', 'wa'), money(r.amt),
-    `<select data-fix="${i}"><option value="">— 跳过 —</option>${acctOpts}</select>`,
+    `<span style="display:flex;gap:4px;align-items:center">
+       <select data-fix="${i}"><option value="">— 跳过 —</option>${acctOpts}</select>
+       <button class="btn sm" data-act="addAcct" title="新增科目">+</button></span>`,
     `<select data-save="${i}" style="min-width:120px">
        <option value="">不存规则</option>
        <option value="memo"${r.memo ? '' : ' disabled'}>按摘要「${H(r.memo.slice(0, 6))}」</option>
        <option value="opp"${r.opp ? '' : ' disabled'}>按户名「${H(r.opp.slice(0, 8))}」</option>
      </select>`
   ]);
-  return `<div class="note"><b>逐条指定科目。</b>勾选「存为规则」的，会把该笔<b>摘要的前 4 个字</b>加进规则库，下次自动匹配。不确定的留「跳过」，这些笔不会进凭证文件，会单独导出成清单。</div>`
+  const noAcct = ACCOUNTS().length === 0;
+  return (noAcct ? `<div class="note c"><b>当前主体「${H(T2.ent || '未选择')}」还没有科目表，所以科目下拉是空的。</b>
+      点科目框右边的 <b>+</b> 逐个加，或者到<b>规则库</b>页一次性套用通用科目模板（25 个常用科目），再按你们实际情况增删。</div>
+      <div style="margin-bottom:12px"><button class="btn pri" data-act="useTpl">套用通用科目模板</button>
+      <button class="btn" data-s="tool-rules">去规则库维护</button></div>` : '')
+    + `<div class="note"><b>逐条指定科目。</b>勾选「存为规则」的，会把该笔<b>摘要的前 4 个字</b>加进规则库，下次自动匹配。不确定的留「跳过」，这些笔不会进凭证文件，会单独导出成清单。</div>`
     + card(`例外清单（${ex.length} 笔）`, table(
       [{ t: '#' }, { t: '日期' }, { t: '摘要' }, { t: '对方户名' }, { t: '方向' }, { t: '金额', n: 1 }, { t: '指定科目' }, { t: '' }], rows))
     + `<div style="display:flex;gap:9px;justify-content:flex-end;margin-top:6px">
@@ -1180,6 +1275,11 @@ function phase2(id) {
 
 /* ============ 路由 ============ */
 let CURD = 'home', CURS = 'home';
+function renderEntBar() {
+  const sel = $('entSel'); if (!sel) return;
+  sel.innerHTML = '<option value="">— 未选择 —</option>' + ENTITIES.map(e =>
+    `<option value="${e.id}" ${CUR_ENT === e.id ? 'selected' : ''}>${H(entShort(e))}${loadRSet(e.id) ? '' : ' ·无规则'}</option>`).join('');
+}
 function renderNav() {
   $('domNav').innerHTML = DOMS.map(d =>
     `<button data-d="${d.id}" class="${d.id === CURD ? 'on' : ''}">
@@ -1201,6 +1301,7 @@ function go(id) {
   else if (PHASE2[id]) view.innerHTML = phase2(id);
   else view.innerHTML = S['home']();
   renderNav();
+  renderEntBar();
   bindDynamic();
   window.scrollTo({ top: 0, behavior: 'instant' });
 }
@@ -1287,8 +1388,25 @@ document.addEventListener('click', e => {
   if (g) { go(g.dataset.go); return; }
   const tb = e.target.closest('[data-tab]');
   if (tb) { T2.tab = tb.dataset.tab; go('t2'); return; }
+  const da = e.target.closest('[data-delacct]');
+  if (da) {
+    if (!RS) return;
+    RS.accounts.splice(+da.dataset.delacct, 1);
+    saveRSet(CUR_ENT, RS); toast('已删除'); go('tool-rules'); return;
+  }
+  const cf = e.target.closest('[data-copyfrom]');
+  if (cf) {
+    const src = loadRSet(cf.dataset.copyfrom);
+    if (!src) return;
+    const copy = JSON.parse(JSON.stringify(src));
+    saveRSet(CUR_ENT, copy);
+    saveRules(CUR_ENT, copy.rules.map(r => Object.assign({ id: uid(), hits: 0, src: '复制' }, r)));
+    useRuleSet(CUR_ENT);
+    toast('已复制，请按本主体实际情况修改'); go('tool-rules'); return;
+  }
   const ue = e.target.closest('[data-useent]');
   if (ue) {
+    e.preventDefault();
     T2.entId = ue.dataset.useent;
     const ei = ENTITIES.find(x => x.id === T2.entId);
     T2.ent = ei ? ei.full : '';
@@ -1396,6 +1514,22 @@ document.addEventListener('click', e => {
     download(`例外清单_${T2.ent}_${new Date().toISOString().slice(0, 10)}.csv`, toCSV([hdr].concat(rows)));
     toast('例外清单已下载');
   }
+  else if (act === 'addAcct') {
+    if (!T2.entId) { toast('请先在顶栏选主体'); return; }
+    if (!RS) { RS = initRSet(T2.entId); }
+    const code = prompt('科目编码（如 560303）'); if (!code) return;
+    const name = prompt('科目名称（如 财务费用_手续费）'); if (!name) return;
+    RS.accounts.push([code.trim(), name.trim()]);
+    saveRSet(T2.entId, RS); toast(`已加科目 ${code} ${name}`); go('t2');
+  }
+  else if (act === 'useTpl') {
+    if (!T2.entId) { toast('请先在顶栏选主体'); return; }
+    if (!RS) { RS = initRSet(T2.entId); }
+    const exist = new Set(RS.accounts.map(a => a[0]));
+    let n = 0;
+    ACC_TPL.forEach(a => { if (!exist.has(a[0])) { RS.accounts.push([...a]); n++; } });
+    saveRSet(T2.entId, RS); toast(`已套用通用科目模板，新增 ${n} 个科目`); go(CURS);
+  }
   else if (act === 'exportRules') {
     const hdr = ['关键词', '方向', '科目编码', '科目名称', '凭证摘要', '命中次数', '来源'];
     download('T2规则库.csv', toCSV([hdr].concat(RULES.map(r => [r.kw, r.dir, r.acct, acctName(r.acct), r.memo || '', r.hits || 0, r.src || '自建']))));
@@ -1414,6 +1548,13 @@ document.addEventListener('click', e => {
   }
 });
 
+$('entSel').addEventListener('change', e => {
+  const id = e.target.value;
+  useRuleSet(id);
+  const ei = ENTITIES.find(x => x.id === id);
+  T2.entId = id; T2.ent = ei ? ei.full : ''; T2.defProj = '';
+  go(CURS);
+});
 $('filePick').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); e.target.value = ''; });
 $('themeBtn').addEventListener('click', () => {
   const r = document.documentElement, cur = r.getAttribute('data-theme');
@@ -1440,4 +1581,6 @@ $('backPortal').addEventListener('click', e => {
 
 /* 启动 */
 $('curPeriod').textContent = new Date().toISOString().slice(0, 7);
+try { useRuleSet(localStorage.getItem('fsc_cur_ent') || ''); } catch (e) { /* 忽略 */ }
+if (CUR_ENT) { const ei = ENTITIES.find(x => x.id === CUR_ENT); T2.entId = CUR_ENT; T2.ent = ei ? ei.full : ''; }
 go('home');

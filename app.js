@@ -270,10 +270,10 @@ const T2 = {
 
 /* 表头别名 */
 const FIELDS = [
-  { k: 'date', n: '日期', alias: ['交易日期', '记账日期', '日期', '交易时间', '业务日期', 'date'], must: 1 },
+  { k: 'date', n: '日期', alias: ['入账日期', '交易日期', '记账日期', '交易日', '日期', '交易时间', '业务日期', 'date'], must: 1 },
   { k: 'memo', n: '摘要', alias: ['摘要', '摘要说明', '用途', '附言', '交易摘要', '备注', '交易类型'], must: 1 },
-  { k: 'inAmt', n: '收入金额', alias: ['收入', '贷方发生额', '贷方金额', '收入金额', '存入', '收款金额'] },
-  { k: 'outAmt', n: '支出金额', alias: ['支出', '借方发生额', '借方金额', '支出金额', '支取', '付款金额'] },
+  { k: 'inAmt', n: '收入金额', alias: ['转入金额', '收入', '贷方发生额', '贷方金额', '收入金额', '存入', '收款金额'] },
+  { k: 'outAmt', n: '支出金额', alias: ['转出金额', '支出', '借方发生额', '借方金额', '支出金额', '支取', '付款金额'] },
   { k: 'amt', n: '发生额（单列）', alias: ['金额', '发生额', '交易金额'] },
   { k: 'dc', n: '借贷标志', alias: ['借贷', '借贷标志', '收付标志', '资金流向'] },
   { k: 'opp', n: '对方户名', alias: ['对方户名', '对方账户名称', '对方名称', '收款人名称', '付款人名称', '对方单位'] },
@@ -333,22 +333,20 @@ function orderDcPair(body, pair, balCol, asc) {
 function autoMap(headerCells, body) {
   const map = {};
   const norm = s => String(s || '').replace(/\s|　/g, '');
-  headerCells.forEach((h, i) => {
-    const c = norm(h); if (!c) return;
-    for (const f of FIELDS) {
-      if (map[f.k] !== undefined) continue;
-      if (f.alias.some(a => c === a)) { map[f.k] = i; return; }
+  const cells = headerCells.map(norm);
+  const used = new Set();
+  // 按「别名优先级」挑列，不按列在表里的先后。
+  // 工行流水里「用途」常常整列是空的，而「摘要」才有内容；若按列序匹配，
+  // 排在前面的「用途」会先被选走，摘要就废了。别名数组里谁排前面谁优先。
+  const pick = (test) => FIELDS.forEach(f => {
+    if (map[f.k] !== undefined) return;
+    for (const a of f.alias) {
+      const i = cells.findIndex((c, idx) => c && !used.has(idx) && test(c, a));
+      if (i >= 0) { map[f.k] = i; used.add(i); return; }
     }
   });
-  // 第二趟：包含匹配
-  headerCells.forEach((h, i) => {
-    const c = norm(h); if (!c) return;
-    if (Object.values(map).includes(i)) return;
-    for (const f of FIELDS) {
-      if (map[f.k] !== undefined) continue;
-      if (f.alias.some(a => c.includes(a))) { map[f.k] = i; return; }
-    }
-  });
+  pick((c, a) => c === a);          // 先精确
+  pick((c, a) => c.includes(a));    // 再包含
 
   if (!body || !body.length) return map;
 
@@ -770,22 +768,72 @@ function t2AcctSelect() {
     + '<div class="mut" style="font-size:11px;margin-top:4px">来自 T1 账户台账。跑完流水，期末余额会回写到 T1 当日余额。</div>';
 }
 
-/* 从文件表头上方那几行里把卡号抠出来。
-   银行对账单表头之前一般有「卡号: 6215****1234」这类说明行，
-   有了它就能自动认出是哪个账户，用户上传完不用再手选。 */
+/* 把这份流水「自己的账号」找出来。银行导出五花八门，三条路依次试：
+   ① 表头上方的说明行里写着「卡号: 6215****1234」——建行、多数网银是这样
+   ② 说明行把标签和值拆在相邻两格：「银行账号」「120914833010605」——招商银行对账单
+   ③ 表里就有一列叫「本方账号」，取第一条数据的值——工行 HISTORYDETAIL
+   都找不到就返回 null，让用户手选，不猜。 */
 function t2SniffAcctNo(rows, headRow) {
-  const re = /(?:卡号|账号|帐号|账户号|户号)\s*[:：]?\s*([0-9][0-9*＊\-\s]{5,})/;
+  const LABEL = /(卡号|本方账号|本方账户|我方账号|银行账号|账户号|户号|账号|帐号)/;
+  const isNo = v => {
+    const t = String(v == null ? '' : v).trim();
+    return /^[0-9][0-9*＊\-\s]{5,}$/.test(t) && t.replace(/[^0-9]/g, '').length >= 6;
+  };
   const scan = rows.slice(0, Math.min(headRow + 1, 12));
+  // ① 同一格里「标签: 数字」
   for (const r of scan) {
     for (const c of r) {
-      const m = re.exec(String(c == null ? '' : c));
-      if (m) {
-        const no = m[1].trim();
-        if (no.replace(/[^0-9]/g, '').length >= 4) return no;
+      const m = /(?:卡号|账号|帐号|账户号|户号)\s*[:：]\s*([0-9][0-9*＊\-\s]{5,})/.exec(String(c == null ? '' : c));
+      if (m && m[1].replace(/[^0-9]/g, '').length >= 6) return m[1].trim();
+    }
+  }
+  // ② 标签在这一格、数字在右边某一格（中间可能隔着空格子）
+  for (const r of scan) {
+    for (let i = 0; i < r.length; i++) {
+      if (!LABEL.test(String(r[i] || '').replace(/\s/g, ''))) continue;
+      for (let j = i + 1; j < Math.min(i + 4, r.length); j++) {
+        if (isNo(r[j])) return String(r[j]).trim();
       }
     }
   }
+  // ③ 表里有「本方账号」列，取第一条有值的数据行
+  const head = (rows[headRow] || []).map(h => String(h == null ? '' : h).replace(/\s/g, ''));
+  const own = head.findIndex(h => /^(本方账号|本方账户|我方账号|账号)$/.test(h));
+  if (own >= 0) {
+    for (const r of rows.slice(headRow + 1, headRow + 30)) {
+      if (isNo(r[own])) return String(r[own]).trim();
+    }
+  }
   return null;
+}
+
+/* 兜底：文件里压根没有本方账号时（工行有的导出就只有对方账号），
+   拿文件名去撞主体。只在「唯一命中一个主体」时才用，撞上两个就不猜。
+   这是猜的，界面上必须说清楚，让人核一眼。 */
+function t2GuessByFileName() {
+  if (!T2.file || typeof t1Accounts !== 'function') return;
+  const fn = String(T2.file.name || '');
+  const core = full => String(full)
+    .replace(/^(广州市|广州|深圳市|深圳|中山市|中山|海南省|海南)/, '')
+    .replace(/（广州）|\(广州\)/g, '')
+    .replace(/(合伙企业（有限合伙）|有限责任公司|股份有限公司|有限公司|公司)$/, '');
+  // 取核心名的前 2-4 个字去文件名里找，命中最长的那个
+  const hits = ENTITIES.filter(e => {
+    const c = core(e.full);
+    for (let n = Math.min(4, c.length); n >= 2; n--) {
+      if (fn.includes(c.slice(0, n))) return true;
+    }
+    return false;
+  });
+  if (hits.length !== 1) return;          // 不唯一就不猜
+  const e = hits[0];
+  const accs = t1Accounts(e.full);
+  if (!accs.length) return;
+  T2.entId = e.id; T2.ent = e.full;
+  useRuleSet(T2.entId); T2.defProj = defaultProjOf();
+  if (!T2.line && e.line) T2.line = e.line;
+  T2.autoBind = { guess: 1, ent: e.full, only: accs.length === 1 };
+  if (accs.length === 1) { t2SetAcct(accs[0].id); t2PushBalance(); }
 }
 
 /* 上传文件后自动认账户：靠文件里的卡号去 T1 台账匹配。
@@ -794,7 +842,7 @@ function t2AutoBind() {
   T2.sniffNo = null; T2.autoBind = null;
   if (!T2.rows || typeof t1FindAccByNo !== 'function') return;
   const no = t2SniffAcctNo(T2.rows, T2.headRow);
-  if (!no) return;
+  if (!no) { t2GuessByFileName(); return; }
   T2.sniffNo = no;
   const acc = t1FindAccByNo(no);
   if (!acc) { T2.autoBind = { miss: 1 }; return; }
@@ -885,7 +933,15 @@ function t2PushTxns() {
 /* 上传后自动认账户的结果，连同余额有没有写进 T1，一并摊开说 */
 function t2AutoBindNote() {
   const ab = T2.autoBind;
-  if (!ab) return T2.sniffNo ? '' : '';
+  if (!ab) return '';
+  if (ab.guess) {
+    const p = T2.balPush;
+    return `<div class="note w"><b>这份文件里没有本方账号，主体是按文件名「${H(T2.file ? T2.file.name : '')}」猜的：${H(ab.ent)}。</b>
+      ${ab.only
+        ? `该主体只有一个账户，已选上${p && p.ok ? `，期末余额 ${money(p.val)}（${p.date}）已写入 T1` : ''}。`
+        : '该主体下有多个账户，<b>请在下面选一下是哪个</b>——选了余额才会写进 T1。'}
+      <b>猜错了在下面改主体</b>，改完余额会重新写。想以后自动认出来，把账号填进 T1 台账。</div>`;
+  }
   if (ab.miss) {
     return `<div class="note w"><b>文件里的卡号是 ${H(T2.sniffNo)}，但 T1 台账里没有账号对得上的账户。</b>
       下面手动选一下是哪个账户${T2.acctId ? `，然后 <button class="btn sm" data-act="t2bindNo">把这个卡号记到该账户</button>，下次上传就自动认出来了` : '——选完可以把卡号记进台账，下次就自动了'}。</div>`;

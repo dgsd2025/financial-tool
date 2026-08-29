@@ -880,9 +880,9 @@ S['tool-rules'] = () => {
 
 S['tool-log'] = () => {
   const log = loadLog();
-  if (!log.length) return head('处理记录', '每次转换都会留痕：谁、什么时候、处理了多少笔、导出了什么。', '工具箱 · T2')
+  if (!log.length) return head('处理记录', '每次转换都会留痕：什么时候、哪份文件、处理了多少笔、有没有导出。', '工具箱 · T2')
     + `<div class="soonbox"><div class="si">▷</div><h3>还没有处理记录</h3><p>用 T2 转换一次银行流水后，这里会记录下来。</p></div>`;
-  return head('处理记录', '每次转换都会留痕：谁、什么时候、处理了多少笔、导出了什么。', '工具箱 · T2',
+  return head('处理记录', '每次转换都会留痕：什么时候、哪份文件、处理了多少笔、有没有导出。', '工具箱 · T2',
     `<button class="btn" data-act="clearLog">清空记录</button>`)
     + card('记录', table(
       [{ t: '时间' }, { t: '文件' }, { t: '主体' }, { t: '总笔数', n: 1 }, { t: '已匹配', n: 1 }, { t: '例外', n: 1 }, { t: '匹配率' }, { t: '导出' }],

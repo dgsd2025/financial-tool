@@ -62,46 +62,47 @@ const DOMS = [
 
 /* ============ 主数据 ============ */
 /* 主体：规则库按主体隔离。不同主体业务完全不同，共用一套规则必然记错账。 */
-/* 法人主体 —— 与 T1 账户台账同源（《银行资料信息/银行.xlsx》），简称必须和台账一致，
-   T2 的账户下拉靠简称去 T1 取账户。优栖的 id 保持 'youqi'，否则它的规则库会丢。 */
+/* 法人主体 —— 与 T1 账户台账同源（《银行资料信息/银行.xlsx》）。
+   用法人全称做匹配键：T2 的账户下拉靠它去 T1 取账户，两边必须字字相同。
+   优栖的 id 保持 'youqi'，否则它的规则库会丢。 */
 const ENTITIES = [
-  { id: 'e01', short: '乐时婴童用品', full: '广州乐时婴童用品有限公司', line: '' },
-  { id: 'e02', short: '星逸文化', full: '广州星逸文化有限公司', line: '' },
-  { id: 'e03', short: '澳乐电子商务科技', full: '广州澳乐电子商务科技有限公司', line: '' },
-  { id: 'e04', short: '橘农农业发展', full: '广州市橘农农业发展有限公司', line: '' },
-  { id: 'e05', short: '萌立方文化', full: '深圳萌立方文化有限公司', line: '' },
-  { id: 'e06', short: '贝堡儿童用品', full: '广州贝堡儿童用品有限公司', line: '' },
-  { id: 'e07', short: '澳乐游玩母婴用品', full: '广州澳乐游玩母婴用品有限公司', line: '' },
-  { id: 'e08', short: '达观文化', full: '广州达观文化有限公司', line: '' },
-  { id: 'e09', short: '星逸贸易', full: '广州市星逸贸易有限公司', line: '' },
-  { id: 'e10', short: '堂品玩具', full: '广州堂品玩具有限公司', line: '' },
-  { id: 'e11', short: '奇妙口袋供应链', full: '广州奇妙口袋供应链有限公司', line: '' },
-  { id: 'e12', short: '有方新媒体科技', full: '广州有方新媒体科技有限公司', line: '' },
-  { id: 'e13', short: '昭妍贸易', full: '广州昭妍贸易有限公司', line: '' },
-  { id: 'e14', short: '源美生物科技', full: '广州源美生物科技有限公司', line: '' },
-  { id: 'e15', short: '锐度生物科技', full: '广州锐度生物科技有限公司', line: '' },
-  { id: 'e16', short: '艺晟生物科技', full: '广州艺晟生物科技有限公司', line: '' },
-  { id: 'e17', short: '荣耀商贸', full: '广州荣耀商贸有限公司', line: '' },
-  { id: 'e18', short: '不易', full: '广州不易文化传播有限公司', line: '' },
-  { id: 'e19', short: '德逸', full: '广州德逸技术有限责任公司', line: '' },
-  { id: 'e20', short: '泰昌', full: '广州泰昌百川管理咨询有限责任公司', line: '' },
-  { id: 'e21', short: '万视', full: '广州万视智能科技有限责任公司', line: '' },
-  { id: 'e22', short: '贝蜜', full: '广州贝蜜电子商务有限公司', line: '' },
-  { id: 'e23', short: '数智', full: '广州数智云仓产业园运营有限公司', line: '' },
-  { id: 'e24', short: '云泰', full: '广州云泰运营管理有限公司', line: '' },
-  { id: 'e25', short: 'AOLE', full: 'AOLE. Limited', line: '' },
-  { id: 'youqi', short: '优栖', full: '优栖（广州）服务管理有限公司', line: '出租屋' },
-  { id: 'e27', short: '钧恒', full: '海南钧恒投资有限公司', line: '' },
-  { id: 'e28', short: '弈晟', full: '海南弈晟企业管理有限公司', line: '' },
-  { id: 'e29', short: '智租', full: '广州智租贸易有限公司', line: '' },
-  { id: 'e30', short: '优机库', full: '广州优机库贸易有限公司', line: '' },
-  { id: 'e31', short: '瑞眠', full: '广州瑞眠科技有限公司', line: '' },
-  { id: 'e32', short: '云迪', full: '广州云迪物业管理服务合伙企业（有限合伙）', line: '' },
-  { id: 'e33', short: '云湃', full: '广州云湃供应链服务合伙企业（有限合伙）', line: '' },
-  { id: 'e34', short: '云帕', full: '广州云帕供应链管理有限公司', line: '' },
-  { id: 'e35', short: '云基', full: '广州云基电子商务合伙企业（有限合伙）', line: '' },
-  { id: 'e36', short: '闪租', full: '广州闪租数码贸易有限公司', line: '' },
-  { id: 'e37', short: '木同', full: '中山市木同日用品有限公司', line: '' },
+  { id: 'e01', full: '广州乐时婴童用品有限公司', line: '' },
+  { id: 'e02', full: '广州星逸文化有限公司', line: '' },
+  { id: 'e03', full: '广州澳乐电子商务科技有限公司', line: '' },
+  { id: 'e04', full: '广州市橘农农业发展有限公司', line: '' },
+  { id: 'e05', full: '深圳萌立方文化有限公司', line: '' },
+  { id: 'e06', full: '广州贝堡儿童用品有限公司', line: '' },
+  { id: 'e07', full: '广州澳乐游玩母婴用品有限公司', line: '' },
+  { id: 'e08', full: '广州达观文化有限公司', line: '' },
+  { id: 'e09', full: '广州市星逸贸易有限公司', line: '' },
+  { id: 'e10', full: '广州堂品玩具有限公司', line: '' },
+  { id: 'e11', full: '广州奇妙口袋供应链有限公司', line: '' },
+  { id: 'e12', full: '广州有方新媒体科技有限公司', line: '' },
+  { id: 'e13', full: '广州昭妍贸易有限公司', line: '' },
+  { id: 'e14', full: '广州源美生物科技有限公司', line: '' },
+  { id: 'e15', full: '广州锐度生物科技有限公司', line: '' },
+  { id: 'e16', full: '广州艺晟生物科技有限公司', line: '' },
+  { id: 'e17', full: '广州荣耀商贸有限公司', line: '' },
+  { id: 'e18', full: '广州不易文化传播有限公司', line: '' },
+  { id: 'e19', full: '广州德逸技术有限责任公司', line: '' },
+  { id: 'e20', full: '广州泰昌百川管理咨询有限责任公司', line: '' },
+  { id: 'e21', full: '广州万视智能科技有限责任公司', line: '' },
+  { id: 'e22', full: '广州贝蜜电子商务有限公司', line: '' },
+  { id: 'e23', full: '广州数智云仓产业园运营有限公司', line: '' },
+  { id: 'e24', full: '广州云泰运营管理有限公司', line: '' },
+  { id: 'e25', full: 'AOLE. Limited', line: '' },
+  { id: 'youqi', full: '优栖（广州）服务管理有限公司', line: '出租屋' },
+  { id: 'e27', full: '海南钧恒投资有限公司', line: '' },
+  { id: 'e28', full: '海南弈晟企业管理有限公司', line: '' },
+  { id: 'e29', full: '广州智租贸易有限公司', line: '' },
+  { id: 'e30', full: '广州优机库贸易有限公司', line: '' },
+  { id: 'e31', full: '广州瑞眠科技有限公司', line: '' },
+  { id: 'e32', full: '广州云迪物业管理服务合伙企业（有限合伙）', line: '' },
+  { id: 'e33', full: '广州云湃供应链服务合伙企业（有限合伙）', line: '' },
+  { id: 'e34', full: '广州云帕供应链管理有限公司', line: '' },
+  { id: 'e35', full: '广州云基电子商务合伙企业（有限合伙）', line: '' },
+  { id: 'e36', full: '广州闪租数码贸易有限公司', line: '' },
+  { id: 'e37', full: '中山市木同日用品有限公司', line: '' },
 ];
 
 const LINES = ['电商', '集包', '物业收租', '手机租赁', '出租屋', '设备租赁', '塑料制造'];
@@ -742,10 +743,10 @@ function t2Step1() {
     <div class="note w" style="margin:12px 0 0"><b>工具不替你做的：</b>不猜科目、不自动入账、不碰网银。生成的是<b>草稿</b>，导入账务系统前请复核。</div>`)}`;
 }
 
-/* 当前主体的简称——T1 账户台账用简称存主体（「优栖」），ENTITIES 里存全称 */
-const t2EntShort = () => {
+/* 当前主体的匹配键 —— T1 账户台账也用法人全称存主体，两边字字相同才对得上 */
+const t2EntKey = () => {
   const e = ENTITIES.find(x => x.id === T2.entId);
-  return e ? e.short : '';
+  return e ? e.full : '';
 };
 /* 选定收付账户：只记 id，账号文本从 T1 台账带出来（账号为空就退回用账户名） */
 function t2SetAcct(id) {
@@ -758,7 +759,7 @@ function t2AcctSelect() {
   if (!T2.entId) {
     return '<select disabled><option>— 请先选主体 —</option></select>';
   }
-  const accs = (typeof t1Accounts === 'function') ? t1Accounts(t2EntShort()) : [];
+  const accs = (typeof t1Accounts === 'function') ? t1Accounts(t2EntKey()) : [];
   if (!accs.length) {
     return '<select disabled><option>— 该主体在 T1 台账里没有在管账户 —</option></select>'
       + '<div class="mut" style="font-size:11px;margin-top:4px">去 <b>T1 资金日报 → 账户台账</b> 添加，这里就能选到</div>';
@@ -797,7 +798,7 @@ function t2AutoBind() {
   T2.sniffNo = no;
   const acc = t1FindAccByNo(no);
   if (!acc) { T2.autoBind = { miss: 1 }; return; }
-  const ent = ENTITIES.find(e => e.short === acc.ent);
+  const ent = ENTITIES.find(e => e.full === acc.ent);
   if (ent) {
     T2.entId = ent.id; T2.ent = ent.full;
     useRuleSet(T2.entId); T2.defProj = defaultProjOf();

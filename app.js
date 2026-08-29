@@ -21,7 +21,11 @@ function kpis(arr) {
 }
 function table(cols, rows, foot) {
   return `<div class="tw"><table><thead><tr>${cols.map(c => `<th class="${c.n ? 'num' : ''}">${H(c.t)}</th>`).join('')}</tr></thead>
-  <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td class="${cols[i] && cols[i].n ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody>
+  <tbody>${rows.map(r => {
+    const cells = Array.isArray(r) ? r : r.d;
+    const cls = Array.isArray(r) ? '' : (r.cls || '');
+    return `<tr class="${cls}">${cells.map((c, i) => `<td class="${cols[i] && cols[i].n ? 'num' : ''}">${c}</td>`).join('')}</tr>`;
+  }).join('')}</tbody>
   ${foot ? `<tfoot><tr>${foot.map((c, i) => `<td class="${cols[i] && cols[i].n ? 'num' : ''}">${c}</td>`).join('')}</tr></tfoot>` : ''}</table></div>`;
 }
 const card = (t, b, tools) => `<div class="card"><div class="ch"><h3>${H(t)}</h3><span class="sp"></span>${tools || ''}</div><div class="cb flush">${b}</div></div>`;
@@ -54,7 +58,17 @@ const DOMS = [
   { id: 'inv', n: '票据', ic: '▼', items: [['p-inv-in', '进项票池'], ['p-inv-out', '销项开票']] },
   { id: 'ar', n: '应收', ic: '◫', items: [['p-ar-contract', '合同台账'], ['p-ar-bill', '应收账单'], ['p-ar-claim', '收款认领'], ['p-ar-aging', '账龄与催收']] },
   { id: 'cost', n: '费控', ic: '▧', items: [['p-exp', '报销与费控'], ['p-flow', '审批路由']] },
-  { id: 'close', n: '核算', ic: '▩', items: [['p-stock', '进销存台账'], ['p-count', '月末盘点'], ['p-close', '月结检查单'], ['p-ic', '往来对平'], ['p-report', '报表中心'], ['p-tax-cal', '申报日历']] },
+  { id: 'close', n: '核算', ic: '▩', ready: 1, items: [
+      ['ac-vch', '凭证库'],
+      ['--账簿'],
+      ['ac-bal', '科目余额表'], ['ac-detail', '明细账'], ['ac-gl', '总分类账'],
+      ['--固定资产'],
+      ['p-fa', '资产卡片'], ['p-fadep', '折旧计提'],
+      ['--报表中心'],
+      ['p-report', '报表中心'],
+      ['--其他'],
+      ['p-stock', '进销存台账'], ['p-count', '月末盘点'], ['p-close', '月结检查单'],
+      ['p-ic', '往来对平'], ['p-tax-cal', '申报日历'] ] },
   { id: 'analysis', n: '分析', ic: '◧', items: [['p-dash', '经营看板'], ['p-daily', '日损益'], ['p-project', '项目盈利']] },
   { id: 'control', n: '管控', ic: '⚑', items: [['p-related', '关联方'], ['p-alert', '预警中心'], ['p-log', 'Agent日志']] },
   { id: 'base', n: '基础', ic: '⚙', items: [['p-entity', '主体档案'], ['p-dim', '核算维度'], ['p-match', '跨系统对码'], ['p-perm', '用户与权限']] },
@@ -1262,7 +1276,8 @@ function t2Step5() {
         <span class="mut">25 列金蝶模版：日期·凭证字·凭证号·附件数·分录序号·摘要·科目代码·科目名称·借贷方金额·客户·供应商·职员·项目·部门·存货·自定义辅助核算×2·数量·单价·原币金额·币别·汇率</span><br>
         <span class="mut">科目代码只写主科目，项目按<b>编码</b>填「项目」列（如 1001 花都UU公寓）</span></div>
         <button class="btn pri" style="margin-top:11px" data-act="dlKingdee" ${ready ? '' : 'disabled'}>下载金蝶凭证 xlsx</button>
-        <button class="btn" style="margin-top:11px" data-act="dlVoucher" ${bal ? '' : 'disabled'}>凭证明细 CSV（留痕用）</button>`)}
+        <button class="btn" style="margin-top:11px" data-act="dlVoucher" ${bal ? '' : 'disabled'}>凭证明细 CSV（留痕用）</button>
+        <button class="btn pri" style="margin-top:11px" data-act="toLedger" ${bal ? '' : 'disabled'}>入凭证库</button>`)}
       ${cardp('例外清单', ex.length ? `<div style="font-size:12.5px;line-height:1.8">
         ${ex.length} 笔未能自动匹配<br><span class="mut">这些笔不在凭证文件里，需人工在账务系统单独处理</span></div>
         <button class="btn" style="margin-top:11px" data-act="dlEx">下载例外清单 CSV</button>`
@@ -1291,6 +1306,8 @@ const PHASE2 = {
   'p-ar-aging': ['账龄与催收', 'M3', '四级逾期分级预警'],
   'p-exp': ['报销与费控', 'M4', '预算前置管控、备用金超期拦截'],
   'p-flow': ['审批路由', 'M4', '权限表内置自动路由'],
+  'p-fa': ['资产卡片', 'M12', '卡片、原值、折旧方法、月折旧自动算'],
+  'p-fadep': ['折旧计提', 'M12', '按月计提并回写凭证，平均年限法'],
   'p-stock': ['进销存台账', 'M11', '加权平均法、期初只读自动推算'],
   'p-count': ['月末盘点', 'M11', '差异强制归因与处理动作'],
   'p-close': ['月结检查单', 'M5', '24 项清单自动跑、强校验阻断'],
@@ -1333,13 +1350,16 @@ function renderNav() {
       <span class="ic">${d.ic}</span>${d.n}${d.ready ? '' : '<span class="p2">二期</span>'}</button>`).join('');
   const d = DOMS.find(x => x.id === CURD);
   $('subNav').innerHTML = (d && d.items.length)
-    ? d.items.map(([id, n]) => `<button data-s="${id}" class="${id === CURS ? 'on' : ''}">${n}</button>`).join('')
+    ? d.items.map(it => it.length === 1
+        ? `<span class="navgp">${H(it[0].slice(2))}</span>`
+        : `<button data-s="${it[0]}" class="${it[0] === CURS ? 'on' : ''}">${it[1]}</button>`).join('')
     : `<button class="on">${d ? d.n : ''}</button>`;
 }
 function go(id) {
   if (/^t[1234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
+  else if (id.startsWith('ac-')) CURD = 'close';
   else {
-    const d = DOMS.find(x => x.items.some(i => i[0] === id) || x.id === id);
+    const d = DOMS.find(x => x.items.some(i => i.length > 1 && i[0] === id) || x.id === id);
     if (d) CURD = d.id;
   }
   CURS = id;
@@ -1428,7 +1448,7 @@ function bindDynamic() {
 
 document.addEventListener('click', e => {
   const d = e.target.closest('[data-d]');
-  if (d) { const dom = DOMS.find(x => x.id === d.dataset.d); go(dom.items.length ? dom.items[0][0] : dom.id); return; }
+  if (d) { const dom = DOMS.find(x => x.id === d.dataset.d); const f = dom.items.find(i => i.length > 1); go(f ? f[0] : dom.id); return; }
   const s = e.target.closest('[data-s]');
   if (s) { go(s.dataset.s); return; }
   const g = e.target.closest('[data-go]');
@@ -1554,6 +1574,11 @@ document.addEventListener('click', e => {
     download(`凭证明细_${T2.ent}_${new Date().toISOString().slice(0, 10)}.csv`, toCSV([hdr].concat(vouchers())));
     t2LogExport();
     toast('凭证明细 CSV 已下载，处理记录已留痕');
+  }
+  else if (act === 'toLedger') {
+    if (!T2.entId) { toast('请先选主体'); return; }
+    const n = vchImport(T2.entId, vouchers(), 'T2·' + (T2.file ? T2.file.name : '流水'));
+    toast(`已入库 ${n} 张凭证，可在「核算 → 凭证库」查看`, 3600);
   }
   else if (act === 'dlEx') {
     const hdr = ['行号', '日期', '摘要', '对方户名', '方向', '金额', '未匹配原因'];

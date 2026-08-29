@@ -216,3 +216,10 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:2px solid var(--
 .t1in::placeholder{color:var(--text-3)}
 .t1pre{font-family:var(--f-mono);font-size:12px;line-height:1.75;white-space:pre-wrap;word-break:break-word;margin:0;color:var(--text);background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:14px 16px;max-height:60vh;overflow:auto}
 input[type=date]{font-family:inherit;font-size:12px;padding:4px 7px;border:1px solid var(--border-2);border-radius:5px;background:var(--surface);color:var(--text)}
+
+/* 二级导航分组标签 */
+.navgp{color:var(--text-3);font-size:10px;font-family:var(--f-mono);letter-spacing:.08em;padding:12px 6px 8px 12px;white-space:nowrap;align-self:center;border-left:1px solid var(--border);margin-left:4px}
+.sub>.navgp:first-child{border-left:none;margin-left:0}
+
+/* 账簿：期初/合计行 */
+tr.sum td{background:var(--surface-2);font-weight:600}

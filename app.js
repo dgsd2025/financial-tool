@@ -61,6 +61,7 @@ const DOMS = [
   { id: 'close', n: '核算', ic: '▩', ready: 1, items: [
       ['ac-vch', '凭证库'],
       ['--账簿'],
+      ['ac-open', '期初余额'],
       ['ac-bal', '科目余额表'], ['ac-detail', '明细账'], ['ac-gl', '总分类账'],
       ['--固定资产'],
       ['p-fa', '资产卡片'], ['p-fadep', '折旧计提'],
@@ -206,33 +207,34 @@ const RS_YOUQI = {
     { kw: '手续费|汇费|工本费|短信费|账户管理费|年费', dir: 'out', acct: '560303_{p}', memo: '银行手续费' },
   ],
 };
-/* 通用科目模板 —— 新主体起步用，之后按各自真账增删 */
-const ACC_TPL = [
-  ['1001', '库存现金'],
-  ['100201', '银行存款_基本户'],
-  ['100202', '银行存款_一般户'],
-  ['1122', '应收账款'],
-  ['1221', '其他应收款'],
-  ['1123', '预付账款'],
-  ['2202', '应付账款'],
-  ['2203', '预收账款'],
-  ['2241', '其他应付款'],
-  ['221101', '应付职工薪酬_工资'],
-  ['222112', '应交税费_应交个人所得税'],
-  ['22210107', '应交税费_应交增值税_销项税额'],
-  ['5001', '主营业务收入'],
-  ['5051', '其他业务收入'],
-  ['5401', '主营业务成本'],
-  ['5402', '其他业务成本'],
-  ['560202', '管理费用_房租'],
-  ['560204', '管理费用_水电费'],
-  ['560206', '管理费用_清洁费'],
-  ['560209', '管理费用_工资'],
-  ['560223', '管理费用_服务费'],
-  ['5602', '管理费用_办公费'],
-  ['5601', '销售费用'],
-  ['560303', '财务费用_手续费'],
-  ['560302', '财务费用_利息'],
+/* 小企业会计准则 · 标准科目表 —— 所有主体自动配齐（负责人拍板）。
+   每个主体的科目 = 这张标准表 + 该主体自建科目（同编码时自建的名称优先）。
+   标准科目不占各主体的存储、不可删；要更细的（如 5602 下的费用明细）自建。 */
+const SE_CHART = [
+  // 资产类
+  ['1001', '库存现金'], ['1002', '银行存款'], ['1012', '其他货币资金'],
+  ['1101', '短期投资'], ['1121', '应收票据'], ['1122', '应收账款'],
+  ['1123', '预付账款'], ['1131', '应收股利'], ['1132', '应收利息'],
+  ['1221', '其他应收款'], ['1401', '材料采购'], ['1403', '原材料'],
+  ['1405', '库存商品'], ['1411', '周转材料'],
+  ['1501', '长期债券投资'], ['1511', '长期股权投资'],
+  ['1601', '固定资产'], ['1602', '累计折旧'], ['1604', '在建工程'],
+  ['1606', '固定资产清理'], ['1701', '无形资产'], ['1702', '累计摊销'],
+  ['1801', '长期待摊费用'], ['1901', '待处理财产损溢'],
+  // 负债类
+  ['2001', '短期借款'], ['2201', '应付票据'], ['2202', '应付账款'],
+  ['2203', '预收账款'], ['2211', '应付职工薪酬'], ['2221', '应交税费'],
+  ['222101', '应交税费_应交增值税'], ['2231', '应付利息'], ['2232', '应付利润'],
+  ['2241', '其他应付款'], ['2401', '递延收益'], ['2501', '长期借款'],
+  ['2701', '长期应付款'],
+  // 所有者权益类
+  ['3001', '实收资本'], ['3002', '资本公积'], ['3101', '盈余公积'],
+  ['3103', '本年利润'], ['3104', '利润分配'],
+  // 损益类
+  ['5001', '主营业务收入'], ['5051', '其他业务收入'], ['5111', '投资收益'],
+  ['5301', '营业外收入'], ['5401', '主营业务成本'], ['5402', '其他业务成本'],
+  ['5403', '税金及附加'], ['5601', '销售费用'], ['5602', '管理费用'],
+  ['5603', '财务费用'], ['5711', '营业外支出'], ['5801', '所得税费用'],
 ];
 
 /* 其余主体尚无规则集——它们业务不同（电商、集包、塑料制造），
@@ -251,7 +253,7 @@ const RS_YUNDI = {
     ['222112', '应交税费_应交个人所得税'],
     ['22210107', '应交税费_应交增值税_销项税额'],
     ['224102', '其他应付款_股东往来'],
-    ['4001', '实收资本'],
+    ['3001', '实收资本'],
     ['5001', '主营业务收入'],
     ['5401', '主营业务成本'],
     ['5602', '管理费用'],
@@ -304,7 +306,13 @@ function useRuleSet(entId) {
 /** 主体自带的默认项目（用户可在步骤 2 改） */
 const defaultProjOf = () => (RS && RS.defaultProj) || '';
 const PROJECTS = () => (RS ? RS.projects : []);
-const ACCOUNTS = () => (RS ? RS.accounts : []);
+/* 主体科目 = 自建 + 标准表补齐（同编码自建优先），按编码排序 */
+const ACCOUNTS = () => {
+  const custom = RS ? RS.accounts : [];
+  const seen = new Set(custom.map(a => String(a[0])));
+  return custom.concat(SE_CHART.filter(a => !seen.has(a[0])))
+    .slice().sort((x, y) => String(x[0]).localeCompare(String(y[0])));
+};
 
 function detectProj(text) {
   const s = String(text || '');
@@ -790,7 +798,7 @@ S['tool-rules'] = () => {
         ${cardp('从通用模板起步（推荐）', `<div style="font-size:12.5px;line-height:1.8">
           套用 ${ACC_TPL.length} 个常用科目（现金、银行存款、往来、收入成本、三大费用），
           再按贵司实际增删。</div>
-          <button class="btn pri" style="margin-top:11px" data-act="useTpl">套用通用科目模板</button>`)}
+          `)}
         ${cardp('从别的主体复制', `<div style="font-size:12.5px;line-height:1.8">
           业务相近的主体可以直接复制它的科目表与规则，再改。</div>
           <div style="margin-top:11px;display:flex;gap:7px;flex-wrap:wrap">
@@ -811,9 +819,14 @@ S['tool-rules'] = () => {
     `<button class="btn sm" data-delrule="${r.id}">删除</button>`
   ]);
   const curEnt = ENTITIES.find(e => e.id === T2.entId);
-  const accRows = ACCOUNTS().map((a, i) => [
-    `<span class="code">${H(a[0])}</span>`, H(a[1]),
-    `<button class="btn sm" data-delacct="${i}">删除</button>`]);
+  const customs = RS ? RS.accounts : [];
+  const customSet = new Set(customs.map(a => String(a[0])));
+  const accRows = customs.map((a, i) => [
+    `<span class="code">${H(a[0])}</span>`, H(a[1]), pill('自建', 'ok'),
+    `<button class="btn sm" data-delacct="${i}">删除</button>`])
+    .concat(SE_CHART.filter(a => !customSet.has(a[0])).map(a => [
+      `<span class="code">${H(a[0])}</span>`, H(a[1]), pill('标准', 'mu'), '']))
+    .sort((x, y) => x[0].localeCompare(y[0]));
   return head('规则库 · ' + (curEnt ? curEnt.full : ''),
     '摘要关键词 → 会计科目。每处理一次例外就可以存成规则，规则库越养越准。<b>规则按主体隔离</b>。', '工具箱 · T2',
     `<button class="btn" data-act="exportRules">导出规则</button><button class="btn pri" data-act="addRule">+ 新增规则</button>`)
@@ -826,10 +839,9 @@ S['tool-rules'] = () => {
     + `<div class="note"><b>规则匹配顺序：</b>从上到下，命中第一条即停。所以<b>越具体的规则要放越前面</b>。新增规则默认插在最前。</div>`
     + card('规则列表', table(
       [{ t: '关键词（正则）' }, { t: '方向' }, { t: '科目' }, { t: '凭证摘要' }, { t: '命中', n: 1 }, { t: '来源' }, { t: '' }], rows))
-    + card(`科目表（${ACCOUNTS().length} 个）`, accRows.length
-        ? table([{ t: '编码' }, { t: '名称' }, { t: '' }], accRows)
-        : `<div style="padding:20px;text-align:center;color:var(--text-3)">还没有科目</div>`,
-      `<button class="btn" data-act="useTpl">套用通用模板</button><button class="btn pri" data-act="addAcct">+ 新增科目</button>`)
+    + card(`科目表（${ACCOUNTS().length} 个 · 小企业会计准则标准表已配齐）`,
+        table([{ t: '编码' }, { t: '名称' }, { t: '来源' }, { t: '' }], accRows),
+      `<button class="btn pri" data-act="addAcct">+ 新增科目</button>`)
     + `<div class="note"><b>规则依赖科目表。</b>科目表里没有的科目，处理例外时选不到。
        建议顺序：先把常用科目建齐，再在处理例外时把「这类流水 → 这个科目」存成规则。</div>`;
 };
@@ -1231,12 +1243,7 @@ function t2Step4() {
        <option value="opp"${r.opp ? '' : ' disabled'}>按户名「${H(r.opp.slice(0, 8))}」</option>
      </select>`
   ]);
-  const noAcct = ACCOUNTS().length === 0;
-  return (noAcct ? `<div class="note c"><b>当前主体「${H(T2.ent || '未选择')}」还没有科目表，所以科目下拉是空的。</b>
-      点科目框右边的 <b>+</b> 逐个加，或者到<b>规则库</b>页一次性套用通用科目模板（25 个常用科目），再按你们实际情况增删。</div>
-      <div style="margin-bottom:12px"><button class="btn pri" data-act="useTpl">套用通用科目模板</button>
-      <button class="btn" data-s="tool-rules">去规则库维护</button></div>` : '')
-    + `<div class="note"><b>逐条指定科目。</b>勾选「存为规则」的，会把该笔<b>摘要的前 4 个字</b>加进规则库，下次自动匹配。不确定的留「跳过」，这些笔不会进凭证文件，会单独导出成清单。</div>`
+  return `<div class="note"><b>逐条指定科目。</b>勾选「存为规则」的，会把该笔<b>摘要的前 4 个字</b>加进规则库，下次自动匹配。不确定的留「跳过」，这些笔不会进凭证文件，会单独导出成清单。</div>`
     + card(`例外清单（${ex.length} 笔）`, table(
       [{ t: '#' }, { t: '日期' }, { t: '摘要' }, { t: '对方户名' }, { t: '方向' }, { t: '金额', n: 1 }, { t: '指定科目' }, { t: '' }], rows))
     + `<div style="display:flex;gap:9px;justify-content:flex-end;margin-top:6px">
@@ -1370,13 +1377,30 @@ function setRange(k, v) {
   go(CURS);
 }
 
-function renderEntBar() {
-  const inp = $('entSel'), dl = $('entOpts'); if (!inp || !dl) return;
-  // datalist 在 Chrome 里按子串过滤，敲「云帕」就能筛出来——这就是模糊查找
-  dl.innerHTML = ENTITIES.map(e =>
-    `<option value="${H(e.full)}">${loadRSet(e.id) ? '' : '无规则'}</option>`).join('');
-  const cur = ENTITIES.find(e => e.id === CUR_ENT);
-  if (document.activeElement !== inp) inp.value = cur ? cur.full : '';
+/* 主体组合框：敲字模糊筛 + 点 ▾ 出全量下拉，两种用法都行。
+   filter 传 null 表示非搜索状态——把输入框恢复成当前主体名。 */
+function renderEntBar(filter) {
+  const inp = $('entSel'), list = $('entList'); if (!inp || !list) return;
+  const t = String(filter == null ? '' : filter).trim();
+  const items = ENTITIES.filter(e => !t || e.full.includes(t));
+  list.innerHTML = (items.length ? items.map(e =>
+    `<div class="ci ${e.id === CUR_ENT ? 'on' : ''}" data-entpick="${e.id}">${H(e.full)}${loadRSet(e.id) ? '' : ' <span class="cimut">无规则</span>'}</div>`).join('')
+    : '<div class="ci cimut">没有匹配的主体</div>');
+  if (filter == null && document.activeElement !== inp) {
+    const cur = ENTITIES.find(e => e.id === CUR_ENT);
+    inp.value = cur ? cur.full : '';
+  }
+}
+function pickEnt(id) {
+  useRuleSet(id);
+  const ei = ENTITIES.find(x => x.id === id);
+  T2.entId = id || ''; T2.ent = ei ? ei.full : ''; T2.defProj = '';
+  const l = $('entList'); if (l) l.style.display = 'none';
+  // 输入框可能还处于聚焦搜索态，强制回填选中的全称，别留半截搜索词
+  const inp = $('entSel');
+  if (inp) { inp.value = ei ? ei.full : ''; inp.blur(); }
+  renderEntBar();
+  go(CURS);
 }
 /* 把用户敲的字解析成主体：先全等，再子串。命中多个不猜，让用户再补几个字 */
 function resolveEnt(txt) {
@@ -1639,14 +1663,6 @@ document.addEventListener('click', e => {
     RS.accounts.push([code.trim(), name.trim()]);
     saveRSet(T2.entId, RS); toast(`已加科目 ${code} ${name}`); go('t2');
   }
-  else if (act === 'useTpl') {
-    if (!T2.entId) { toast('请先在顶栏选主体'); return; }
-    if (!RS) { RS = initRSet(T2.entId); }
-    const exist = new Set(RS.accounts.map(a => a[0]));
-    let n = 0;
-    ACC_TPL.forEach(a => { if (!exist.has(a[0])) { RS.accounts.push([...a]); n++; } });
-    saveRSet(T2.entId, RS); toast(`已套用通用科目模板，新增 ${n} 个科目`); go(CURS);
-  }
   else if (act === 'exportRules') {
     const hdr = ['关键词', '方向', '科目编码', '科目名称', '凭证摘要', '命中次数', '来源'];
     download('T2规则库.csv', toCSV([hdr].concat(RULES.map(r => [r.kw, r.dir, r.acct, acctName(r.acct), r.memo || '', r.hits || 0, r.src || '自建']))));
@@ -1665,16 +1681,33 @@ document.addEventListener('click', e => {
   }
 });
 
-$('entSel').addEventListener('change', e => {
-  const r = resolveEnt(e.target.value);
-  if (r.empty) { useRuleSet(''); T2.entId = ''; T2.ent = ''; go(CURS); return; }
-  if (r.multi) { toast(`「${e.target.value.trim()}」匹配到 ${r.multi} 个主体，再多打几个字`); return; }
-  if (r.none) { toast('没找到这个主体'); renderEntBar(); return; }
-  useRuleSet(r.hit.id);
-  T2.entId = r.hit.id; T2.ent = r.hit.full; T2.defProj = '';
-  renderEntBar();
-  go(CURS);
-});
+/* 主体组合框事件：聚焦/敲字出筛选列表，点 ▾ 出全量，点选项即切换，
+   回车按模糊解析走（命中多个不猜）。用 mousedown 选项，抢在 blur 之前。 */
+(() => {
+  const inp = $('entSel'), list = $('entList'), btn = $('entBtn');
+  const show = f => { renderEntBar(f); list.style.display = 'block'; };
+  const hide = () => { list.style.display = 'none'; };
+  inp.addEventListener('focus', () => show(''));
+  inp.addEventListener('input', () => show(inp.value));
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const r = resolveEnt(inp.value);
+      if (r.empty) { pickEnt(''); inp.blur(); }
+      else if (r.multi) toast(`「${inp.value.trim()}」匹配到 ${r.multi} 个主体，再多打几个字，或从下拉里点选`);
+      else if (r.none) toast('没找到这个主体，点 ▾ 看全部');
+      else { pickEnt(r.hit.id); inp.blur(); }
+    } else if (e.key === 'Escape') { hide(); inp.blur(); renderEntBar(); }
+  });
+  inp.addEventListener('blur', () => setTimeout(() => { hide(); renderEntBar(); }, 120));
+  btn.addEventListener('click', () => {
+    if (list.style.display === 'block') hide();
+    else { inp.focus(); inp.select(); show(''); }
+  });
+  document.addEventListener('mousedown', e => {
+    const it = e.target.closest('[data-entpick]');
+    if (it) { e.preventDefault(); pickEnt(it.dataset.entpick); }
+  });
+})();
 document.addEventListener('change', e => {
   if (e.target.id === 'perFrom' || e.target.id === 'acFrom') setRange('from', e.target.value);
   else if (e.target.id === 'perTo' || e.target.id === 'acTo') setRange('to', e.target.value);

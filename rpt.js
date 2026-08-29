@@ -95,57 +95,130 @@ S['rp-home'] = () => {
 };
 
 /* ============ 资产负债表 ============ */
-/* 时点表：期末 = AC.to；年初 = 期末所在年的 1 月 1 日之前。
-   诚实口径：按科目余额直列（编码排序），不做流动/非流动重分类——
-   重分类需要逐科目人工判断，机器硬分只会分错。
-   未分配利润 = 全部损益科目累计净额（系统未做年度结转，本年利润直接滚入）。 */
+/* 按小企业会计准则（会小01表）标准行次出表：行次固定、全部列出（无发生额也占行），
+   科目按编码前缀归入行次。归不进去的进「其他」行并警告，不无声丢数。
+   未分配利润 = 标准科目余额 + 全部损益科目累计净额（系统未做年度结转，本年利润直接滚入）。 */
+const BS_LINES = {
+  // [行次标签, 编码正则]。金额=区间内累计净额，资产取借方向，负债权益取贷方向。
+  curAsset: [
+    ['货币资金', /^(1001|1002|1012)/],
+    ['短期投资', /^1101/],
+    ['应收票据', /^1121/],
+    ['应收账款', /^1122/],
+    ['预付账款', /^1123/],
+    ['应收股利', /^1131/],
+    ['应收利息', /^1132/],
+    ['其他应收款', /^1221/],
+    ['存货', /^14/],
+  ],
+  nonAsset: [
+    ['长期债券投资', /^1501|^1511/],
+    ['长期股权投资', /^1512|^1521/],
+    ['固定资产原值', /^1601/],
+    ['减：累计折旧', /^1602/, 'contra'],
+    ['在建工程', /^(1604|1605)/],
+    ['无形资产', /^1701/],
+    ['减：累计摊销', /^1702/, 'contra'],
+    ['长期待摊费用', /^1801/],
+  ],
+  curLiab: [
+    ['短期借款', /^2001/],
+    ['应付票据', /^2201/],
+    ['应付账款', /^2202/],
+    ['预收账款', /^2203/],
+    ['应付职工薪酬', /^2211/],
+    ['应交税费', /^2221/],
+    ['应付利息', /^2231/],
+    ['应付利润', /^2232/],
+    ['其他应付款', /^2241/],
+  ],
+  nonLiab: [
+    ['长期借款', /^2501/],
+    ['递延收益', /^2401/],
+    ['长期应付款', /^2701/],
+  ],
+  equity: [
+    ['实收资本', /^(3001|4001)/],
+    ['资本公积', /^(3002|4002)/],
+    ['盈余公积', /^(3101|4101)/],
+    ['未分配利润', /^(3103|3104|4103|4104)/],
+  ],
+};
 function rptBsData() {
-  const yearStart = AC.to.slice(0, 4) + '-01-01';
   const end = rptBalAt(CUR_ENT, AC.to, AC.inc);
-  const open = rptBalAt(CUR_ENT, yearStart.slice(0, 10) < '2026-01-02' ? '2025-12-31' : (AC.to.slice(0, 4) - 1) + '-12-31', AC.inc);
-  const line = (m, k) => m[k] ? m[k].net : 0;
-  const keys = [...new Set([...Object.keys(end), ...Object.keys(open)])].sort();
-  const rows = { asset: [], liab: [], eq: [] };
-  let pnlEnd = 0, pnlOpen = 0, other = [];
-  keys.forEach(k => {
-    const e = line(end, k), o = line(open, k);
-    const nm = (end[k] && end[k].name) || (open[k] && open[k].name) || acctName(k) || k;
-    if (/^1/.test(k)) rows.asset.push({ k, nm, e, o });
-    else if (/^2/.test(k)) rows.liab.push({ k, nm, e: -e, o: -o });
-    else if (/^[34]/.test(k)) rows.eq.push({ k, nm, e: -e, o: -o });
-    else if (/^5/.test(k)) { pnlEnd += e; pnlOpen += o; }
-    else other.push(k + ' ' + nm);
+  const open = rptBalAt(CUR_ENT, (AC.to.slice(0, 4) - 1) + '-12-31', AC.inc);
+  const used = new Set();
+  const sumBy = (m, re) => Object.keys(m).filter(k => re.test(k))
+    .reduce((s, k) => { used.add(k); return s + m[k].net; }, 0);
+  // 每个行次算期末与年初；contra（累计折旧/摊销）在资产侧是贷方余额，取负显示为减项
+  const build = (defs, sign) => defs.map(d => {
+    const e = sumBy(end, d[1]) * sign, o = sumBy(open, d[1]) * sign;
+    return { nm: d[0], e: d[2] === 'contra' ? -e : e, o: d[2] === 'contra' ? -o : o, contra: d[2] === 'contra' };
   });
-  rows.eq.push({ k: '', nm: '未分配利润（含本年利润，未结转）', e: -pnlEnd, o: -pnlOpen });
-  const sum = a => a.reduce((s, x) => s + x.e, 0), sumO = a => a.reduce((s, x) => s + x.o, 0);
-  return { rows, other,
-    ta: sum(rows.asset), tl: sum(rows.liab), te: sum(rows.eq),
-    taO: sumO(rows.asset), tlO: sumO(rows.liab), teO: sumO(rows.eq) };
+  const curAsset = build(BS_LINES.curAsset, 1), nonAsset = build(BS_LINES.nonAsset, 1);
+  const curLiab = build(BS_LINES.curLiab, -1), nonLiab = build(BS_LINES.nonLiab, -1);
+  const equity = build(BS_LINES.equity, -1);
+  // 损益累计滚入未分配利润
+  let pnlEnd = 0, pnlOpen = 0;
+  Object.keys(end).forEach(k => { if (/^5/.test(k)) { used.add(k); pnlEnd += end[k].net; } });
+  Object.keys(open).forEach(k => { if (/^5/.test(k)) { used.add(k); pnlOpen += open[k].net; } });
+  const rp = equity.find(x => x.nm === '未分配利润');
+  rp.nm = '未分配利润（含本年利润，未结转）'; rp.e += -pnlEnd; rp.o += -pnlOpen;
+  // 归不进行次的科目：资产/负债各兜一行，其余列警告
+  const others = { a: 0, aO: 0, l: 0, lO: 0, list: [] };
+  const keys = [...new Set([...Object.keys(end), ...Object.keys(open)])];
+  keys.forEach(k => {
+    if (used.has(k)) return;
+    const e = end[k] ? end[k].net : 0, o = open[k] ? open[k].net : 0;
+    const nm = (end[k] && end[k].name) || (open[k] && open[k].name) || k;
+    if (/^1/.test(k)) { others.a += e; others.aO += o; others.list.push(k + ' ' + nm); }
+    else if (/^2/.test(k)) { others.l += -e; others.lO += -o; others.list.push(k + ' ' + nm); }
+    else if (/^[34]/.test(k)) { rp.e += -e; rp.o += -o; others.list.push(k + ' ' + nm + '（并入未分配利润行）'); }
+    else others.list.push(k + ' ' + nm + '（未计入！）');
+  });
+  if (others.a || others.aO) curAsset.push({ nm: '其他流动资产（未归类科目）', e: others.a, o: others.aO });
+  if (others.l || others.lO) curLiab.push({ nm: '其他流动负债（未归类科目）', e: others.l, o: others.lO });
+  // contra 行已取负，直接求和就是净值口径
+  const T = a => a.reduce((s, x) => s + (x.contra ? -x.e : x.e), 0);
+  const TO = a => a.reduce((s, x) => s + (x.contra ? -x.o : x.o), 0);
+  return { curAsset, nonAsset, curLiab, nonLiab, equity, other: others.list,
+    tca: T(curAsset), tcaO: TO(curAsset), tna: T(nonAsset), tnaO: TO(nonAsset),
+    tcl: T(curLiab), tclO: TO(curLiab), tnl: T(nonLiab), tnlO: TO(nonLiab),
+    te: T(equity), teO: TO(equity) };
 }
 S['rp-bs'] = () => {
   if (!CUR_ENT) return needEnt('资产负债表');
   const d = rptBsData();
-  const balanced = Math.abs(d.ta - d.tl - d.te) < 0.01;
-  const R = a => a.filter(x => Math.abs(x.e) > 0.005 || Math.abs(x.o) > 0.005)
-    .map(x => [`${x.k ? `<span class="code">${H(x.k)}</span> ` : ''}${H(x.nm)}`, money(x.e), money(x.o)]);
+  const ta = d.tca + d.tna, taO = d.tcaO + d.tnaO;
+  const tl = d.tcl + d.tnl, tlO = d.tclO + d.tnlO;
+  const balanced = Math.abs(ta - tl - d.te) < 0.01;
+  const R = a => a.map(x => [`　${H(x.nm)}`, money(x.e), money(x.o)]);
+  const g = t => ({ cls: 'lv1', d: [`<b>${t}</b>`, '', ''] });
+  const sm = (t, e, o) => ({ cls: 'sum', d: [`<b>${t}</b>`, `<b>${money(e)}</b>`, `<b>${money(o)}</b>`] });
   const cols = [{ t: '项目' }, { t: '期末余额', n: 1 }, { t: '年初余额', n: 1 }];
-  return head('资产负债表', `${H(entName())} · 期末 ${AC.to}。按科目余额直列，未做流动/非流动重分类（那需要逐科目人工判断）。`, '报表中心 · 会企01表',
-    `期间 ${acRangeHtml('ac')} <button class="btn pri" data-act="rptExpBs">导出</button>`)
+  return head('资产负债表', `${H(entName())} · 期末 ${AC.to}。小企业会计准则标准行次，行次固定全列（无发生额也占行）。`, '报表中心 · 会小01表',
+    `<button class="btn pri" data-act="rptExpBs">导出</button>`)
     + kpis([
-      { k: '资产总计', v: money(d.ta) },
-      { k: '负债合计', v: money(d.tl) },
+      { k: '资产总计', v: money(ta) },
+      { k: '负债合计', v: money(tl) },
       { k: '所有者权益合计', v: money(d.te) },
-      { k: '平衡校验', v: balanced ? '✓' : money(d.ta - d.tl - d.te), t: balanced ? 'g' : 'c' },
+      { k: '平衡校验', v: balanced ? '✓' : money(ta - tl - d.te), t: balanced ? 'g' : 'c' },
     ])
-    + (balanced ? '' : `<div class="note c"><b>资产 ≠ 负债 + 权益，差 ${money(d.ta - d.tl - d.te)}。</b>通常是有凭证借贷不平——回报表首页看检查项。</div>`)
-    + (d.other.length ? `<div class="note w"><b>有科目归不进资产/负债/权益/损益：</b>${d.other.map(H).join('、')}。请检查科目编码。</div>` : '')
+    + (balanced ? '' : `<div class="note c"><b>资产 ≠ 负债 + 权益，差 ${money(ta - tl - d.te)}。</b>通常是有凭证借贷不平——回报表首页看检查项。</div>`)
+    + (d.other.length ? `<div class="note w"><b>有科目没归进标准行次：</b>${d.other.map(H).join('、')}。已并入「其他」行，请检查科目编码。</div>` : '')
     + `<div class="cols c2">
-      ${card('资产', table(cols, R(d.rows.asset).concat([{ cls: 'sum', d: ['<b>资产总计</b>', `<b>${money(d.ta)}</b>`, `<b>${money(d.taO)}</b>`] }])))}
+      ${card('资产', table(cols,
+        [g('流动资产：')].concat(R(d.curAsset))
+        .concat([sm('流动资产合计', d.tca, d.tcaO), g('非流动资产：')])
+        .concat(R(d.nonAsset))
+        .concat([sm('非流动资产合计', d.tna, d.tnaO), sm('资产总计', ta, taO)])))}
       ${card('负债和所有者权益', table(cols,
-        R(d.rows.liab).concat([{ cls: 'sum', d: ['<b>负债合计</b>', `<b>${money(d.tl)}</b>`, `<b>${money(d.tlO)}</b>`] }])
-        .concat(R(d.rows.eq)).concat([
-          { cls: 'sum', d: ['<b>所有者权益合计</b>', `<b>${money(d.te)}</b>`, `<b>${money(d.teO)}</b>`] },
-          { cls: 'sum', d: ['<b>负债和所有者权益总计</b>', `<b>${money(d.tl + d.te)}</b>`, `<b>${money(d.tlO + d.teO)}</b>`] }])))}
+        [g('流动负债：')].concat(R(d.curLiab))
+        .concat([sm('流动负债合计', d.tcl, d.tclO), g('非流动负债：')])
+        .concat(R(d.nonLiab))
+        .concat([sm('非流动负债合计', d.tnl, d.tnlO), sm('负债合计', tl, tlO), g('所有者权益：')])
+        .concat(R(d.equity))
+        .concat([sm('所有者权益合计', d.te, d.teO), sm('负债和所有者权益总计', tl + d.te, tlO + d.teO)])))}
     </div>`;
 };
 
@@ -153,19 +226,21 @@ S['rp-bs'] = () => {
 function rptPlData(a, b) {
   const m = rptNet(CUR_ENT, a, b, AC.inc);
   const rev = rptCr(rptPick(m, /^(5001|5051)/));
-  const cost = rptDr(rptPick(m, /^54/));
+  const cost = rptDr(rptPick(m, /^(5401|5402)/));
+  const taxSur = rptDr(rptPick(m, /^5403/));
   const sell = rptDr(rptPick(m, /^5601/));
   const adm = rptDr(rptPick(m, /^5602/));
   const fin = rptDr(rptPick(m, /^5603/));
+  const invInc = rptCr(rptPick(m, /^5111/));
   const noIn = rptCr(rptPick(m, /^5301/));
   const noOut = rptDr(rptPick(m, /^5711/));
   const tax = rptDr(rptPick(m, /^5801/));
-  const known = /^(5001|5051|54|5601|5602|5603|5301|5711|5801)/;
+  const known = /^(5001|5051|5111|5401|5402|5403|5601|5602|5603|5301|5711|5801)/;
   const un = rptPick(m, /^5/).filter(x => !known.test(x[0]));
   const unNet = rptCr(un);
-  const op = rev - cost - sell - adm - fin;
+  const op = rev - cost - taxSur - sell - adm - fin + invInc;
   const total = op + noIn - noOut + unNet;
-  return { rev, cost, sell, adm, fin, noIn, noOut, tax, op, total, net: total - tax,
+  return { rev, cost, taxSur, sell, adm, fin, invInc, noIn, noOut, tax, op, total, net: total - tax,
     un: un.map(x => x[0] + ' ' + (x[1].name || '')) };
 }
 S['rp-pl'] = () => {
@@ -174,8 +249,8 @@ S['rp-pl'] = () => {
   const ys = AC.to.slice(0, 4) + '-01-01';
   const yr = rptPlData(ys, AC.to);
   const row = (nm, k, cls) => ({ cls: cls || '', d: [nm, money(cur[k]), money(yr[k])] });
-  return head('利润表', `${H(entName())} · 本期 ${AC.from}〜${AC.to}，本年累计 ${ys} 起。`, '报表中心 · 会企02表',
-    `期间 ${acRangeHtml('ac')} <button class="btn pri" data-act="rptExpPl">导出</button>`)
+  return head('利润表', `${H(entName())} · 本期 ${AC.from}〜${AC.to}，本年累计 ${ys} 起。`, '报表中心 · 会小02表',
+    `<button class="btn pri" data-act="rptExpPl">导出</button>`)
     + kpis([
       { k: '营业收入', v: money(cur.rev) },
       { k: '营业成本', v: money(cur.cost) },
@@ -187,9 +262,11 @@ S['rp-pl'] = () => {
       [{ t: '项目' }, { t: '本期金额', n: 1 }, { t: '本年累计', n: 1 }], [
         row('一、营业收入', 'rev'),
         row('　减：营业成本', 'cost'),
+        row('　　　税金及附加', 'taxSur'),
         row('　　　销售费用', 'sell'),
         row('　　　管理费用', 'adm'),
         row('　　　财务费用', 'fin'),
+        row('　加：投资收益', 'invInc'),
         { cls: 'sum', d: ['<b>二、营业利润</b>', `<b>${money(cur.op)}</b>`, `<b>${money(yr.op)}</b>`] },
         row('　加：营业外收入', 'noIn'),
         row('　减：营业外支出', 'noOut'),
@@ -237,8 +314,8 @@ S['rp-cf'] = () => {
     .concat(Object.keys(a.items).sort().map(k =>
       [`　${H(k)}`, a.items[k].in ? money(a.items[k].in) : '', a.items[k].out ? money(a.items[k].out) : '']))
     .concat([{ cls: 'sum', d: [`<b>${t.slice(0, t.length - 1)}净额</b>`, '', `<b>${money(netOf(a))}</b>`] }]);
-  return head('现金流量表', `${H(entName())} · ${AC.from}〜${AC.to}。货币资金口径 = 库存现金(1001) + 银行存款(1002) + 其他货币资金(1012)，三者互转不计现金流。从对方科目直接归类；混合凭证按金额最大的对方科目归入，属简化口径。`, '报表中心 · 会企03表',
-    `期间 ${acRangeHtml('ac')} <button class="btn pri" data-act="rptExpCf">导出</button>`)
+  return head('现金流量表', `${H(entName())} · ${AC.from}〜${AC.to}。货币资金口径 = 库存现金(1001) + 银行存款(1002) + 其他货币资金(1012)，三者互转不计现金流。从对方科目直接归类；混合凭证按金额最大的对方科目归入，属简化口径。`, '报表中心 · 会小03表',
+    `<button class="btn pri" data-act="rptExpCf">导出</button>`)
     + kpis([
       { k: '经营活动净额', v: money(netOf(d.acts.op)), t: netOf(d.acts.op) >= 0 ? 'g' : 'c' },
       { k: '投资活动净额', v: money(netOf(d.acts.inv)) },
@@ -281,7 +358,7 @@ S['rp-exp'] = () => {
     return [`<span class="code">${H(base)}</span>`, H((cur[k] || year[k]).name || acctName(k)), H(projName(proj)), money(c), money(y)];
   });
   return head('费用明细表', `${H(entName())} · 本期 ${AC.from}〜${AC.to}。费用科目 × 项目，本期与本年累计。`, '报表中心',
-    `期间 ${acRangeHtml('ac')} <button class="btn pri" data-act="rptExpExp">导出</button>`)
+    `<button class="btn pri" data-act="rptExpExp">导出</button>`)
     + kpis([
       { k: '本期费用合计', v: money(tc) },
       { k: '本年累计', v: money(ty) },
@@ -301,18 +378,22 @@ document.addEventListener('click', e => {
   const rng = AC.from + '_' + AC.to;
   if (act === 'rptExpBs') {
     const d = rptBsData();
-    const rows = [['类别', '科目', '项目', '期末余额', '年初余额']];
-    d.rows.asset.forEach(x => rows.push(['资产', x.k, x.nm, x.e.toFixed(2), x.o.toFixed(2)]));
-    d.rows.liab.forEach(x => rows.push(['负债', x.k, x.nm, x.e.toFixed(2), x.o.toFixed(2)]));
-    d.rows.eq.forEach(x => rows.push(['所有者权益', x.k, x.nm, x.e.toFixed(2), x.o.toFixed(2)]));
-    rows.push(['合计', '', '资产总计', d.ta.toFixed(2), d.taO.toFixed(2)]);
-    rows.push(['合计', '', '负债和权益总计', (d.tl + d.te).toFixed(2), (d.tlO + d.teO).toFixed(2)]);
+    const rows = [['项目', '期末余额', '年初余额']];
+    const put = (t, a) => { rows.push([t, '', '']); a.forEach(x => rows.push(['　' + x.nm, x.e.toFixed(2), x.o.toFixed(2)])); };
+    put('流动资产：', d.curAsset); rows.push(['流动资产合计', d.tca.toFixed(2), d.tcaO.toFixed(2)]);
+    put('非流动资产：', d.nonAsset); rows.push(['非流动资产合计', d.tna.toFixed(2), d.tnaO.toFixed(2)]);
+    rows.push(['资产总计', (d.tca + d.tna).toFixed(2), (d.tcaO + d.tnaO).toFixed(2)]);
+    put('流动负债：', d.curLiab); rows.push(['流动负债合计', d.tcl.toFixed(2), d.tclO.toFixed(2)]);
+    put('非流动负债：', d.nonLiab); rows.push(['非流动负债合计', d.tnl.toFixed(2), d.tnlO.toFixed(2)]);
+    rows.push(['负债合计', (d.tcl + d.tnl).toFixed(2), (d.tclO + d.tnlO).toFixed(2)]);
+    put('所有者权益：', d.equity); rows.push(['所有者权益合计', d.te.toFixed(2), d.teO.toFixed(2)]);
+    rows.push(['负债和所有者权益总计', (d.tcl + d.tnl + d.te).toFixed(2), (d.tclO + d.tnlO + d.teO).toFixed(2)]);
     download(`资产负债表_${AC.to}.csv`, toCSV(rows)); toast('已导出');
   } else if (act === 'rptExpPl') {
     const cur = rptPlData(AC.from, AC.to), yr = rptPlData(AC.to.slice(0, 4) + '-01-01', AC.to);
     const L = [['项目', '本期金额', '本年累计'],
-      ['一、营业收入', cur.rev, yr.rev], ['减：营业成本', cur.cost, yr.cost],
-      ['销售费用', cur.sell, yr.sell], ['管理费用', cur.adm, yr.adm], ['财务费用', cur.fin, yr.fin],
+      ['一、营业收入', cur.rev, yr.rev], ['减：营业成本', cur.cost, yr.cost], ['税金及附加', cur.taxSur, yr.taxSur],
+      ['税金及附加', cur.taxSur, yr.taxSur], ['销售费用', cur.sell, yr.sell], ['管理费用', cur.adm, yr.adm], ['财务费用', cur.fin, yr.fin],
       ['二、营业利润', cur.op, yr.op], ['加：营业外收入', cur.noIn, yr.noIn], ['减：营业外支出', cur.noOut, yr.noOut],
       ['三、利润总额', cur.total, yr.total], ['减：所得税费用', cur.tax, yr.tax], ['四、净利润', cur.net, yr.net]]
       .map(r => [r[0], typeof r[1] === 'number' ? r[1].toFixed(2) : r[1], typeof r[2] === 'number' ? r[2].toFixed(2) : r[2]]);

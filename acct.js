@@ -152,8 +152,7 @@ S['ac-vch'] = () => {
     ];
   });
   return head('凭证库', `${H(entName())} · 账簿的唯一数据来源。<b>T2 生成的凭证在这里入库</b>，账簿与报表全部从这里实时汇总。`, '核算 · 链条起点',
-    `期间 ${acRangeHtml('ac')}
-     <button class="btn" data-act="acPostAll">全部过账</button>
+    `     <button class="btn" data-act="acPostAll">全部过账</button>
      <button class="btn pri" data-s="t2">去 T2 生成凭证</button>`)
     + kpis([
       { k: '本期凭证', v: String(cur.length), u: '张' },
@@ -167,6 +166,44 @@ S['ac-vch'] = () => {
     + card('本期凭证', rows.length ? table(
       [{ t: '日期' }, { t: '凭证字号' }, { t: '摘要' }, { t: '行数', n: 1 }, { t: '金额', n: 1 }, { t: '平衡' }, { t: '来源' }, { t: '状态' }, { t: '' }], rows)
       : `<div style="padding:26px;text-align:center;color:var(--text-3)">本期没有凭证</div>`);
+};
+
+/* ============ 期初余额 ============ */
+/* 期初 = 系统启用前的累计余额，存成一张固定 id 的「期初凭证」，
+   日期钉在 2025-12-31——系统只做 2026 年起的账，它永远排在任何区间之前，
+   所以科目余额表的期初、资产负债表的年初、明细账期初、现金流量表的期初现金
+   全部自动吃到，账簿引擎一行都不用改。
+   借贷不平也允许保存（可以分几次录），但它会触发报表首页的平衡检查、
+   挡住出表——录平了才放行，和其他凭证一个待遇。 */
+const OB_ID = '__ob__';
+const obGet = entId => vchLoad(entId).find(v => v.id === OB_ID) || null;
+
+S['ac-open'] = () => {
+  if (!CUR_ENT) return needEnt('期初余额');
+  const ob = obGet(CUR_ENT);
+  const cur = {};
+  (ob ? ob.lines : []).forEach(l => { cur[l.acct] = l; });
+  const tdr = (ob ? ob.lines : []).reduce((s0, l) => s0 + l.dr, 0);
+  const tcr = (ob ? ob.lines : []).reduce((s0, l) => s0 + l.cr, 0);
+  const diff = tdr - tcr;
+  const rows = ACCOUNTS().map(a => {
+    const c = cur[a[0]] || {};
+    return [`<span class="code">${H(a[0])}</span>`, H(a[1]),
+      `<input type="number" step="0.01" class="obin" data-obdr="${H(a[0])}" value="${c.dr ? c.dr : ''}" placeholder="—">`,
+      `<input type="number" step="0.01" class="obin" data-obcr="${H(a[0])}" value="${c.cr ? c.cr : ''}" placeholder="—">`];
+  });
+  return head('期初余额', `${H(entName())} · 录系统启用前（2026-01-01 之前）各科目的累计余额，录一次即可。留空 = 0。`, '核算 · 账簿',
+    `<button class="btn pri" data-act="obSave">保存期初</button>`)
+    + kpis([
+      { k: '期初借方合计', v: money(tdr) },
+      { k: '期初贷方合计', v: money(tcr) },
+      { k: '借贷差额', v: money(diff), t: Math.abs(diff) < 0.005 ? 'g' : 'c' },
+      { k: '已录科目', v: String(ob ? ob.lines.length : 0), u: '个' },
+    ])
+    + (Math.abs(diff) > 0.005 && ob ? `<div class="note c"><b>期初借贷不平，差 ${money(diff)}。</b>可以先保存、分几次录，但不录平之前报表中心不放行。</div>` : '')
+    + `<div class="note"><b>期初进的是一张日期 2025-12-31 的「期初凭证」</b>，科目余额表的期初、资产负债表的年初、明细账、现金流全部自动生效。改了重新保存即覆盖。资产类填借方，负债和权益类填贷方；未分配利润是历年累计的结存，也录在这里（3104 利润分配）。</div>`
+    + card('各科目期初余额（小企业会计准则科目已配齐）', table(
+      [{ t: '编码' }, { t: '科目名称' }, { t: '期初借方', n: 1 }, { t: '期初贷方', n: 1 }], rows));
 };
 
 /* ============ 科目余额表 ============ */
@@ -189,8 +226,7 @@ S['ac-bal'] = () => {
     `<button class="btn sm" data-acd="${H(o.acct)}">明细</button>`,
   ]);
   return head('科目余额表', `${H(entName())} · 期初、本期、本年累计、期末，四组借贷。`, '核算 · 账簿',
-    `期间 ${acRangeHtml('ac')}
-     <button class="btn" data-act="acToggleZero">${AC.showZero ? '隐藏' : '显示'}无发生额</button>
+    `     <button class="btn" data-act="acToggleZero">${AC.showZero ? '隐藏' : '显示'}无发生额</button>
      <button class="btn" data-act="acToggleInc">${AC.inc ? '含' : '不含'}未过账</button>
      <button class="btn pri" data-act="acExpBal">导出</button>`)
     + kpis([
@@ -229,7 +265,6 @@ S['ac-detail'] = () => {
   ]) : [];
   return head('明细账', `${H(entName())} · 三栏式，按科目逐笔。`, '核算 · 账簿',
     `<select id="acAcctSel">${accts.map(a => `<option value="${H(a.acct)}" ${a.acct === AC.acct ? 'selected' : ''}>${H(a.acct)} ${H(a.name || acctName(a.acct))}</option>`).join('')}</select>
-     期间 ${acRangeHtml('ac')}
      <button class="btn pri" data-act="acExpDetail">导出</button>`)
     + (accts.length
       ? card(`明细账 · ${H(AC.acct)} ${H(nm)}`, table(
@@ -301,6 +336,28 @@ document.addEventListener('click', e => {
     const t = list.find(x => x.id === v.dataset.acv);
     if (t) { t.posted = t.posted ? 0 : 1; vchSave(CUR_ENT, list); toast(t.posted ? '已过账' : '已反过账'); go('ac-vch'); }
     return;
+  }
+  const ob = e.target.closest('[data-act="obSave"]');
+  if (ob && CUR_ENT) {
+    const lines = [];
+    const val = el => { const v = Number(el.value); return isNaN(v) ? 0 : +v.toFixed(2); };
+    const drs = {}, crs = {};
+    document.querySelectorAll('[data-obdr]').forEach(el => { drs[el.dataset.obdr] = val(el); });
+    document.querySelectorAll('[data-obcr]').forEach(el => { crs[el.dataset.obcr] = val(el); });
+    Object.keys(drs).forEach(acct => {
+      const dr = drs[acct] || 0, cr = crs[acct] || 0;
+      if (!dr && !cr) return;
+      lines.push({ acct, name: acctName(acct), dr, cr, memo: '期初余额' });
+    });
+    const list = vchLoad(CUR_ENT).filter(v => v.id !== OB_ID);
+    if (lines.length) list.unshift({ id: OB_ID, period: '2025-12', date: '2025-12-31',
+      word: '期初', no: '0', posted: 1, src: '期初录入', lines });
+    vchSave(CUR_ENT, list);
+    const d = lines.reduce((s0, l) => s0 + l.dr - l.cr, 0);
+    toast(lines.length
+      ? `期初已保存：${lines.length} 个科目` + (Math.abs(d) > 0.005 ? `，借贷差 ${money(d)}，请录平` : '，借贷平衡')
+      : '期初已清空', 4200);
+    go('ac-open'); return;
   }
   const a = e.target.closest('[data-act]');
   if (!a) return;

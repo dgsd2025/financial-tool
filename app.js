@@ -76,7 +76,12 @@ const DOMS = [
       ['p-tax-cal', '申报日历'] ] },
   { id: 'analysis', n: '分析', ic: '◧', items: [['p-dash', '经营看板'], ['p-daily', '日损益'], ['p-project', '项目盈利']] },
   { id: 'control', n: '管控', ic: '⚑', items: [['p-related', '关联方'], ['p-alert', '预警中心'], ['p-log', 'Agent日志']] },
-  { id: 'base', n: '基础', ic: '⚙', items: [['p-entity', '主体档案'], ['p-dim', '核算维度'], ['p-match', '跨系统对码'], ['p-perm', '用户与权限']] },
+  { id: 'base', n: '基础', ic: '⚙', ready: 1, items: [
+      ['bs-acct', '科目设置'],
+      ['--辅助核算'],
+      ['bs-cust', '客户维护'], ['bs-supp', '供应商维护'], ['bs-proj', '项目维护'],
+      ['--其他'],
+      ['p-entity', '主体档案'], ['p-match', '跨系统对码'], ['p-perm', '用户与权限'] ] },
 ];
 
 /* ============ 主数据 ============ */
@@ -310,11 +315,13 @@ function useRuleSet(entId) {
 const defaultProjOf = () => (RS && RS.defaultProj) || '';
 const PROJECTS = () => (RS ? RS.projects : []);
 /* 主体科目 = 自建 + 标准表补齐（同编码自建优先），按编码排序 */
-const ACCOUNTS = () => {
+const ACCOUNTS = (all) => {
   const custom = RS ? RS.accounts : [];
   const seen = new Set(custom.map(a => String(a[0])));
-  return custom.concat(SE_CHART.filter(a => !seen.has(a[0])))
+  const merged = custom.concat(SE_CHART.filter(a => !seen.has(a[0])))
     .slice().sort((x, y) => String(x[0]).localeCompare(String(y[0])));
+  // 停用的科目不进录入下拉；传 all=1 取全量（查名称、科目设置页用）
+  return all ? merged : merged.filter(a => !(a[2] && a[2].off));
 };
 
 function detectProj(text) {
@@ -324,7 +331,7 @@ function detectProj(text) {
 }
 const fillAcct = (code, proj) => String(code).replace('{p}', proj ? proj.code : '____');
 const acctName = code => {
-  const list = ACCOUNTS();
+  const list = ACCOUNTS(1);   // 停用的科目也要能查到名字，历史凭证还引用着
   const hit = list.find(a => a[0] === code);
   if (hit) return hit[1];
   const tpl = list.find(a => a[0].includes('{p}') &&
@@ -1328,7 +1335,6 @@ const PHASE2 = {
   'p-alert': ['预警中心', 'M8', '全系统预警汇总与超期升级'],
   'p-log': ['Agent日志', 'M9', '执行留痕与流程心跳'],
   'p-entity': ['主体档案', 'M0', '多主体统一登记'],
-  'p-dim': ['核算维度', 'M0', '主体/业务线/项目/合同四级'],
   'p-match': ['跨系统对码', 'M0', '销售端与采购端主数据映射'],
   'p-perm': ['用户与权限', '权限', '功能权限 + 数据权限 + 操作权限三维'],
 };
@@ -1429,6 +1435,7 @@ function go(id) {
   if (/^t[1234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
   else if (id.startsWith('ac-') || id.startsWith('rp-')) CURD = 'close';
   else if (id.startsWith('iv-')) CURD = 'inv';
+  else if (id.startsWith('bs-')) CURD = 'base';
   else {
     const d = DOMS.find(x => x.items.some(i => i.length > 1 && i[0] === id) || x.id === id);
     if (d) CURD = d.id;

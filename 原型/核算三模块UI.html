@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>核算与看板 UI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ink:#16202B;--indigo:#2B5CE6;--seal:#C8352B;--jade:#10796B;--amber:#B4700E;
+  --bg:#FAFBFC;--surface:#FFFFFF;--surface-2:#F1F4F7;--surface-3:#E7ECF1;
+  --text:var(--ink);--text-2:#5B6B7C;--text-3:#8695A4;
+  --border:#DDE4EA;--border-2:#C8D2DB;--bar:#1B2733;--bar-text:#9DAFBE;
+  --accent:var(--indigo);--accent-soft:#E8EEFD;--good:var(--jade);--good-soft:#E2F1EE;
+  --warn:var(--amber);--warn-soft:#FBF0DC;--crit:var(--seal);--crit-soft:#FBE8E6;
+  --shadow:0 1px 2px rgba(22,32,43,.06),0 4px 12px rgba(22,32,43,.05);
+  --f-body:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;
+  --f-mono:"IBM Plex Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#101922;--surface:#16212C;--surface-2:#1D2A37;--surface-3:#25343F;
+  --text:#E6EDF3;--text-2:#9BAAB8;--text-3:#71818F;--border:#26343F;--border-2:#33444F;
+  --bar:#0B1219;--accent:#7CA0F5;--accent-soft:#1B2942;--good:#4FBFA9;--good-soft:#122E2B;
+  --warn:#DFA33F;--warn-soft:#33280F;--crit:#E5766B;--crit-soft:#3A1C19;
+}}
+:root[data-theme="dark"]{
+  --bg:#101922;--surface:#16212C;--surface-2:#1D2A37;--surface-3:#25343F;
+  --text:#E6EDF3;--text-2:#9BAAB8;--text-3:#71818F;--border:#26343F;--border-2:#33444F;
+  --bar:#0B1219;--accent:#7CA0F5;--accent-soft:#1B2942;--good:#4FBFA9;--good-soft:#122E2B;
+  --warn:#DFA33F;--warn-soft:#33280F;--crit:#E5766B;--crit-soft:#3A1C19;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--f-body);font-size:13px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{margin:0;font-weight:600;text-wrap:balance}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.bar1{display:flex;align-items:center;gap:10px;background:var(--bar);padding:0 16px;height:46px;position:sticky;top:0;z-index:40}
+.bar1 .logo{width:26px;height:26px;border-radius:6px;background:var(--indigo);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700}
+.bar1 .t{font-size:13.5px;color:#fff;font-weight:500}
+.bar1 .t i{font-style:normal;font-family:var(--f-mono);font-size:9.5px;color:#637585;margin-left:8px}
+.bar1 .sp{flex:1}
+.ibtn{background:rgba(255,255,255,.08);border:none;color:var(--bar-text);border-radius:6px;cursor:pointer;padding:5px 10px;font-size:12px;font-family:inherit}
+.ibtn:hover{background:rgba(255,255,255,.15);color:#fff}
+.bar2{display:flex;gap:2px;background:var(--surface);border-bottom:1px solid var(--border);padding:0 16px;position:sticky;top:46px;z-index:35;overflow-x:auto}
+.bar2 button{background:none;border:none;border-bottom:2px solid transparent;color:var(--text-2);font-family:inherit;font-size:12.5px;padding:10px 12px 8px;cursor:pointer;white-space:nowrap}
+.bar2 button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:500}
+.bar2 .gp{color:var(--text-3);font-size:10.5px;padding:12px 8px 8px;font-family:var(--f-mono);white-space:nowrap}
+.wrap{padding:18px 16px 70px;max-width:1560px}
+.phead{display:flex;align-items:flex-start;gap:14px;margin-bottom:13px;flex-wrap:wrap}
+.phead h2{font-size:18px}
+.phead .s{color:var(--text-2);font-size:12.5px;margin-top:3px;max-width:84ch}
+.phead .mid{margin-left:auto;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.mcode{font-family:var(--f-mono);font-size:10.5px;color:var(--text-3);border:1px solid var(--border);border-radius:4px;padding:2px 6px}
+.btn{font-family:inherit;font-size:12px;border-radius:6px;padding:5px 12px;cursor:pointer;border:1px solid var(--border-2);background:var(--surface);color:var(--text)}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+.sel{display:inline-flex;align-items:center;gap:5px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:3px 9px;font-size:11.5px;color:var(--text-2)}
+.sel b{color:var(--text);font-weight:500}
+.sel::after{content:"▾";color:var(--text-3);font-size:9px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin-bottom:13px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
+.kpi.g::before{background:var(--good)}.kpi.w::before{background:var(--warn)}.kpi.c::before{background:var(--crit)}
+.kpi .k{font-size:11px;color:var(--text-2)}
+.kpi .v{font-family:var(--f-mono);font-size:19px;font-weight:600;margin-top:2px}
+.kpi .v small{font-size:11px;font-weight:400;color:var(--text-3);margin-left:2px}
+.kpi.c .v{color:var(--crit)}.kpi.w .v{color:var(--warn)}.kpi.g .v{color:var(--good)}
+.kpi .d{font-size:10.5px;color:var(--text-3);margin-top:1px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:9px;box-shadow:var(--shadow);margin-bottom:12px;overflow:hidden}
+.card>.ch{display:flex;align-items:center;gap:10px;padding:9px 13px;border-bottom:1px solid var(--border);background:var(--surface-2);flex-wrap:wrap}
+.card>.ch h3{font-size:13px}
+.card>.ch .sp{flex:1}
+.card>.cb{padding:13px}
+.card>.cb.flush{padding:0}
+.cols{display:grid;gap:12px}.c2{grid-template-columns:1fr 1fr}.c3{grid-template-columns:repeat(3,1fr)}
+.c21{grid-template-columns:1.6fr 1fr}
+@media (max-width:1020px){.c2,.c3,.c21{grid-template-columns:1fr}}
+.tw{overflow:auto;max-height:70vh}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:5px 9px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+thead th{background:var(--surface-2);font-weight:500;font-size:10.5px;color:var(--text-2);letter-spacing:.04em;position:sticky;top:0;z-index:2}
+thead th.grp{text-align:center;border-bottom:1px solid var(--border-2);background:var(--surface-3)}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+tfoot td{background:var(--surface-2);font-weight:600;border-top:2px solid var(--border-2)}
+tr.lv1 td:first-child{font-weight:600}
+tr.lv2 td:first-child{padding-left:26px}
+tr.lv3 td:first-child{padding-left:44px;color:var(--text-2)}
+tr.sum td{background:var(--surface-2);font-weight:600}
+.red{color:var(--crit);font-weight:500}.grn{color:var(--good)}.mut{color:var(--text-3)}
+.pill{display:inline-flex;border-radius:20px;padding:1px 8px;font-size:10.5px;font-weight:500;white-space:nowrap}
+.p-ok{background:var(--good-soft);color:var(--good)}.p-wa{background:var(--warn-soft);color:var(--warn)}
+.p-cr{background:var(--crit-soft);color:var(--crit)}.p-in{background:var(--accent-soft);color:var(--accent)}
+.p-mu{background:var(--surface-3);color:var(--text-2)}
+.code{font-family:var(--f-mono);font-size:11px;background:var(--surface-3);border-radius:3px;padding:1px 5px;color:var(--text-2)}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:9px 13px;border-radius:0 7px 7px 0;font-size:12.5px;margin-bottom:12px}
+.note.c{border-left-color:var(--crit);background:var(--crit-soft)}
+.note.w{border-left-color:var(--warn);background:var(--warn-soft)}
+.note.g{border-left-color:var(--good);background:var(--good-soft)}
+.note b{font-weight:700}
+.chain{display:flex;align-items:center;gap:0;overflow-x:auto;margin:6px 0 14px}
+.cn{flex:1;min-width:120px;background:var(--surface-2);border:1px solid var(--border);padding:9px 11px}
+.cn:first-child{border-radius:7px 0 0 7px}.cn:last-child{border-radius:0 7px 7px 0}
+.cn+.cn{border-left:none}
+.cn .t2{font-size:12.5px;font-weight:500}
+.cn .d2{font-size:10.5px;color:var(--text-2);margin-top:2px}
+.cn.done{background:var(--good-soft);border-color:var(--good)}
+.cn.now{background:var(--accent-soft);border-color:var(--accent)}
+.field{margin-bottom:9px}
+.field label{font-size:11px;color:var(--text-2);display:block;margin-bottom:3px}
+.field .inp{border:1px solid var(--border-2);border-radius:5px;padding:5px 9px;background:var(--surface-2);font-size:12px;min-height:29px;display:flex;align-items:center}
+.f3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media (max-width:820px){.f3{grid-template-columns:1fr 1fr}}
+.rptgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.rpt{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:9px;padding:12px 13px;cursor:pointer;text-align:left;font-family:inherit;color:var(--text)}
+.rpt:hover{box-shadow:var(--shadow);border-color:var(--accent)}
+.rpt .n{font-size:13.5px;font-weight:500}
+.rpt .d{font-size:11.5px;color:var(--text-2);margin-top:3px;line-height:1.5}
+.rpt .m{font-family:var(--f-mono);font-size:10px;color:var(--text-3);margin-top:6px}
+/* 看板 */
+.bcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:10px}
+.bc{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 13px;box-shadow:var(--shadow);border-top:3px solid var(--accent);cursor:pointer;text-align:left;font-family:inherit;color:var(--text)}
+.bc:hover{box-shadow:0 4px 16px rgba(22,32,43,.12)}
+.bc.g{border-top-color:var(--good)}.bc.w{border-top-color:var(--warn)}.bc.c{border-top-color:var(--crit)}
+.bc .en{font-size:13px;font-weight:600}
+.bc .sub3{font-size:10.5px;color:var(--text-3);margin-top:1px}
+.bc .big{font-family:var(--f-mono);font-size:21px;font-weight:600;margin:7px 0 2px}
+.bc .row2{display:flex;justify-content:space-between;font-size:11px;color:var(--text-2);margin-top:3px}
+.bc .row2 b{font-family:var(--f-mono);font-weight:600;color:var(--text)}
+.spark{display:flex;align-items:flex-end;gap:2px;height:26px;margin-top:8px}
+.spark i{flex:1;background:var(--accent-soft);border-radius:1px 1px 0 0;min-height:2px}
+.spark i.hi{background:var(--accent)}
+.bar-h{display:flex;align-items:center;gap:8px;margin:5px 0}
+.bar-h .lb{width:96px;font-size:11.5px;color:var(--text-2);flex:none}
+.bar-h .tr{flex:1;height:16px;background:var(--surface-3);border-radius:3px;overflow:hidden;position:relative}
+.bar-h .tr i{display:block;height:100%;background:var(--accent)}
+.bar-h .tr i.g{background:var(--good)}.bar-h .tr i.c{background:var(--crit)}
+.bar-h .vv{width:92px;text-align:right;font-family:var(--f-mono);font-size:11.5px;flex:none}
+.alerts{display:flex;flex-direction:column;gap:6px}
+.al{display:flex;gap:9px;align-items:flex-start;padding:8px 10px;border-radius:7px;background:var(--surface-2);border-left:3px solid var(--warn);font-size:12px}
+.al.c{border-left-color:var(--crit);background:var(--crit-soft)}
+.al .ai{font-size:13px;flex:none}
+.al b{font-weight:600}
+button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="bar1">
+  <span class="logo">财</span>
+  <span class="t">核算与经营看板 · UI 设计<i>待确认 · 未开发</i></span>
+  <span class="sp"></span>
+  <span class="sel">主体 <b>优栖（广州）服务管理</b></span>
+  <span class="sel">期间 <b>2026-08</b></span>
+  <button class="ibtn" id="themeBtn">◐</button>
+</div>
+<div class="bar2" id="nav"></div>
+<div class="wrap" id="view"></div>
+
+<script>
+const H=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const M=n=>(Number(n)||0).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const pill=(t,k)=>`<span class="pill p-${k}">${H(t)}</span>`;
+const kpis=a=>`<div class="kpis">${a.map(k=>`<div class="kpi ${k.t||''}"><div class="k">${H(k.k)}</div><div class="v">${k.v}${k.u?`<small>${H(k.u)}</small>`:''}</div>${k.d?`<div class="d">${H(k.d)}</div>`:''}</div>`).join('')}</div>`;
+const table=(c,r,f,head2)=>`<div class="tw"><table>${head2||''}<thead><tr>${c.map(x=>`<th class="${x.n?'num':''}" ${x.cs?`colspan="${x.cs}"`:''}>${H(x.t)}</th>`).join('')}</tr></thead><tbody>${r.map(row=>Array.isArray(row)?`<tr>${row.map((x,i)=>`<td class="${c[i]&&c[i].n?'num':''}">${x}</td>`).join('')}</tr>`:`<tr class="${row.cls||''}">${row.d.map((x,i)=>`<td class="${c[i]&&c[i].n?'num':''}">${x}</td>`).join('')}</tr>`).join('')}</tbody>${f?`<tfoot><tr>${f.map((x,i)=>`<td class="${c[i]&&c[i].n?'num':''}">${x}</td>`).join('')}</tr></tfoot>`:''}</table></div>`;
+const card=(t,b,tools)=>`<div class="card"><div class="ch"><h3>${H(t)}</h3><span class="sp"></span>${tools||''}</div><div class="cb flush">${b}</div></div>`;
+const cardp=(t,b,tools)=>`<div class="card"><div class="ch"><h3>${H(t)}</h3><span class="sp"></span>${tools||''}</div><div class="cb">${b}</div></div>`;
+const head=(t,s,code,tools)=>`<div class="phead"><div><h2>${H(t)}</h2><div class="s">${s}</div></div><div class="mid">${code?`<span class="mcode">${H(code)}</span>`:''}${tools||''}</div></div>`;
+
+const S={};
+
+/* ══════ 总览 ══════ */
+S.plan=()=>head('三个模块的依赖链','凭证已经能生成了，所以这条链现在通得起来。<b>顺序不能乱</b>——后面每一环都吃前面的产出。','设计说明')
++`<div class="chain">
+  <div class="cn done"><div class="t2">① 凭证</div><div class="d2">T2 已上线<br>工具箱产出</div></div>
+  <div class="cn now"><div class="t2">② 账簿</div><div class="d2">科目余额表<br>明细账 · 总分类账</div></div>
+  <div class="cn now"><div class="t2">③ 固定资产</div><div class="d2">卡片 · 折旧摊销<br>回写凭证</div></div>
+  <div class="cn now"><div class="t2">④ 报表中心</div><div class="d2">资产负债 · 利润<br>现金流量 · 费用明细</div></div>
+</div>`
++`<div class="note"><b>为什么是这个顺序：</b>账簿是把凭证按科目重新组织；报表是把账簿按格式重新汇总。
+  固定资产夹在中间——它<b>产生凭证</b>（每月折旧），所以必须在报表之前完成，否则报表里的累计折旧和费用是缺的。</div>`
++`<div class="cols c3">
+  ${cardp('② 账簿','<div style="font-size:12.5px;line-height:1.9">'
+    +'<b>科目余额表</b>　期初/本期/累计/期末，四组借贷<br>'
+    +'<b>明细账</b>　三栏式，按科目逐笔<br>'
+    +'<b>总分类账</b>　按月汇总，一级科目<br><br>'
+    +'<span class="mut">全部从凭证实时汇总，不单独存储</span></div>')}
+  ${cardp('③ 固定资产','<div style="font-size:12.5px;line-height:1.9">'
+    +'<b>资产卡片</b>　原值/使用月份/残值率/净值<br>'
+    +'<b>折旧计提</b>　按月生成，可回写凭证<br>'
+    +'<b>资产变动</b>　增加/减少/调拨<br>'
+    +'<b>折旧明细表</b>　按部门/科目汇总<br><br>'
+    +'<span class="mut">摊销与折旧同一套机制</span></div>')}
+  ${cardp('④ 报表中心','<div style="font-size:12.5px;line-height:1.9">'
+    +'<b>资产负债表</b>　年初 vs 期末<br>'
+    +'<b>利润表</b>　本期 vs 本年累计<br>'
+    +'<b>现金流量表</b>　经营/投资/筹资<br>'
+    +'<b>费用明细表</b>　按科目×部门×项目<br><br>'
+    +'<span class="mut">全部按公开准则模板</span></div>')}
+</div>`
++`<div class="note w"><b>一个前提要先说清楚：</b>账簿和报表的数只有在<b>凭证齐全</b>时才可信。
+  当前 T2 只处理银行流水，<b>不含计提、结转、摊销这类无现金流的凭证</b>。
+  所以初期账簿能对，但利润表和资产负债表会缺计提部分——这一点会在报表页明确标出来，不装作完整。</div>`;
+
+/* ══════ 账簿 ══════ */
+S.bal=()=>head('科目余额表','按公开模板：期初余额、本期发生额、本年累计、期末余额四组借贷。','账簿',
+ `<span class="sel">级次 <b>2 级</b></span><span class="sel">期间 <b>2026-08</b></span>
+  <button class="btn">显示无发生额科目</button><button class="btn pri">导出</button>`)
++kpis([
+  {k:'期初借贷平衡',v:'✓',t:'g'},{k:'本期借方合计',v:'328,455.03'},
+  {k:'本期贷方合计',v:'328,455.03'},{k:'期末借贷平衡',v:'✓',t:'g'},
+  {k:'含未过账凭证',v:'14',u:'张',t:'w',d:'可切换是否包含'},
+])
++card('科目余额表 · 2026年8月',table(
+ [{t:'科目编码'},{t:'科目名称'},{t:'期初借方',n:1},{t:'期初贷方',n:1},{t:'本期借方',n:1},{t:'本期贷方',n:1},
+  {t:'本年借方',n:1},{t:'本年贷方',n:1},{t:'期末借方',n:1},{t:'期末贷方',n:1}],
+ [
+  {cls:'lv1',d:['<span class="code">1002</span>','银行存款',M(486200),'',M(146538.5),M(178993.5),M(1284000),M(982340),M(453745),'']},
+  {cls:'lv2',d:['<span class="code">100201</span>','张华工行7239','',' ',M(1450),'','','',M(1450),'']},
+  {cls:'lv2',d:['<span class="code">100202</span>','张华工行9999',M(386200),'',M(131542.5),M(164237.5),'','',M(353505),'']},
+  {cls:'lv2',d:['<span class="code">100203</span>','优栖工行6418',M(100000),'',M(13546),M(14756),'','',M(98790),'']},
+  {cls:'lv1',d:['<span class="code">1122</span>','应收账款',M(224680),'','',M(111246.2),M(680400),M(455720),M(113433.8),'']},
+  {cls:'lv2',d:['<span class="code">1122_1001</span>','花都UU公寓',M(68420),'','',M(14868.5),'','',M(53551.5),'']},
+  {cls:'lv2',d:['<span class="code">1122_2001</span>','冼村复建房六期',M(156260),'','',M(96377.7),'','',M(59882.3),'']},
+  {cls:'lv1',d:['<span class="code">2241</span>','其他应付款','',M(86400),'',M(11600),'',M(142000),'',M(98000)]},
+  {cls:'lv2',d:['<span class="code">224101</span>','押金','',M(86400),'',M(11600),'','','',M(98000)]},
+  {cls:'lv1',d:['<span class="code">5001</span>','主营业务收入','',M(1842600),'',M(14455.44),'',M(1857055),'',M(1857055)]},
+  {cls:'lv1',d:['<span class="code">5402</span>','其他业务成本',M(986400),'',M(124930),'',M(1111330),'',M(1111330),'']},
+  {cls:'lv1',d:['<span class="code">5602</span>','管理费用',M(142800),'',M(37008),'',M(179808),'',M(179808),'']},
+  {cls:'lv2',d:['<span class="code">560202</span>','房租',M(48200),'',M(6050),'','','',M(54250),'']},
+  {cls:'lv2',d:['<span class="code">560204</span>','水电费',M(32400),'',M(7496.74),'','','',M(39896.74),'']},
+  {cls:'lv2',d:['<span class="code">560209</span>','工资',M(62200),'',M(15000),'','','',M(77200),'']},
+  {cls:'lv1',d:['<span class="code">5603</span>','财务费用',M(2840),'',M(353.57),'',M(3193.57),'',M(3193.57),'']},
+ ],
+ ['<b>合计</b>','',`<b>${M(1842920)}</b>`,`<b>${M(1929000)}</b>`,`<b>${M(328455.03)}</b>`,`<b>${M(328455.03)}</b>`,
+  `<b>${M(3255538)}</b>`,`<b>${M(3437115)}</b>`,`<b>${M(1861952.11)}</b>`,`<b>${M(1955055)}</b>`]))
++`<div class="note"><b>公开模板的标准做法：</b>四组借贷（期初/本期/本年/期末）、级次可切（1—3 级）、
+  可选是否显示无发生额科目、可选是否包含未过账凭证。<b>合计行必须借贷相等</b>，不等就是凭证有问题，页面顶部直接报警。</div>`;
+
+S.detail=()=>head('明细账','三栏式明细账，按科目逐笔列示。左边选科目，右边看发生。','账簿',
+ `<span class="sel">科目 <b>5402_2001 其他业务成本</b></span><span class="sel">期间 <b>2026-08</b></span>
+  <button class="btn pri">导出</button>`)
++`<div class="cols c21">
+${card('明细账 · 5402_2001 其他业务成本_冼村复建房六期',table(
+ [{t:'日期'},{t:'凭证字号'},{t:'摘要'},{t:'借方',n:1},{t:'贷方',n:1},{t:'方向'},{t:'余额',n:1}],
+ [
+  {cls:'sum',d:['2026-08-01','','<b>期初余额</b>','','','借',M(986400)]},
+  ['2026-08-25','记-1','冼村复建房六期31号607黄巧嫦',M(6080),'','借',M(992480)],
+  ['2026-08-25','记-1','冼村复建房六期31号1208李彩屏',M(6300),'','借',M(998780)],
+  ['2026-08-25','记-1','冼村复建房六期31号1603潘燕波',M(5200),'','借',M(1003980)],
+  ['2026-08-25','记-1','冼村复建房六期31号1907卢国秋',M(6400),'','借',M(1010380)],
+  ['2026-08-25','记-1','冼村复建房六期32号5204卢尤满',M(4500),'','借',M(1014880)],
+  {cls:'mut',d:['','','<span class="mut">…（共 24 笔）</span>','','','','']},
+  {cls:'sum',d:['','','<b>本月合计</b>',`<b>${M(124930)}</b>`,'<b>0.00</b>','借',`<b>${M(1111330)}</b>`]},
+  {cls:'sum',d:['','','<b>本年累计</b>',`<b>${M(1111330)}</b>`,'<b>0.00</b>','借',`<b>${M(1111330)}</b>`]},
+ ]))}
+${cardp('科目树',`<div style="font-size:12px;line-height:2">
+  <div><span class="code">1002</span> 银行存款</div>
+  <div style="padding-left:14px" class="mut">100201 张华工行7239</div>
+  <div style="padding-left:14px" class="mut">100202 张华工行9999</div>
+  <div style="padding-left:14px" class="mut">100203 优栖工行6418</div>
+  <div><span class="code">1122</span> 应收账款</div>
+  <div style="padding-left:14px" class="mut">1122_1001 花都UU公寓</div>
+  <div style="padding-left:14px" class="mut">1122_2001 冼村复建房六期</div>
+  <div><span class="code">2241</span> 其他应付款</div>
+  <div><span class="code">5001</span> 主营业务收入</div>
+  <div style="background:var(--accent-soft);border-radius:4px;padding:1px 5px"><span class="code">5402</span> 其他业务成本 ←</div>
+  <div><span class="code">5602</span> 管理费用</div>
+  <div><span class="code">5603</span> 财务费用</div>
+  </div>`)}
+</div>`
++`<div class="note"><b>标准要素：</b>期初余额单起一行 → 逐笔发生 → 本月合计 → 本年累计。
+  「方向」列自动判借贷。点凭证字号可跳到<b>凭证详情</b>，这是查账时最常用的动作。</div>`;
+
+S.gl=()=>head('总分类账','按一级科目、按月汇总。一个月一行，年末看全年走势。','账簿',
+ `<span class="sel">科目 <b>5402 其他业务成本</b></span><span class="sel">年度 <b>2026</b></span>
+  <button class="btn pri">导出</button>`)
++card('总分类账 · 5402 其他业务成本',table(
+ [{t:'月份'},{t:'摘要'},{t:'借方',n:1},{t:'贷方',n:1},{t:'方向'},{t:'余额',n:1}],
+ [
+  {cls:'sum',d:['','<b>年初余额</b>','','','借',M(0)]},
+  ['1月','本月合计',M(118600),'','借',M(118600)],
+  ['2月','本月合计',M(121400),'','借',M(240000)],
+  ['3月','本月合计',M(119800),'','借',M(359800)],
+  ['4月','本月合计',M(123200),'','借',M(483000)],
+  ['5月','本月合计',M(124600),'','借',M(607600)],
+  ['6月','本月合计',M(126400),'','借',M(734000)],
+  ['7月','本月合计',M(252400),'','借',M(986400)],
+  ['8月','本月合计',M(124930),'','借',M(1111330)],
+  {cls:'sum',d:['','<b>本年累计</b>',`<b>${M(1111330)}</b>`,'<b>0.00</b>','借',`<b>${M(1111330)}</b>`]},
+ ]))
++`<div class="note"><b>与明细账的区别：</b>明细账是<b>逐笔</b>，总分类账是<b>逐月</b>。
+  查具体一笔用明细账，看趋势和对总账用总分类账。两者数据同源，都从凭证实时汇总。</div>`;
+
+/* ══════ 固定资产 ══════ */
+S.fa=()=>head('资产卡片','一张卡片一项资产。原值、使用月份、残值率决定每月折旧额。','固定资产',
+ `<span class="sel">类别 <b>全部</b></span><span class="sel">状态 <b>在用</b></span>
+  <button class="btn">导入</button><button class="btn pri">+ 新增卡片</button>`)
++kpis([
+  {k:'资产总数',v:'28',u:'项'},{k:'原值合计',v:'486.2',u:'万'},
+  {k:'累计折旧',v:'142.8',u:'万'},{k:'净值',v:'343.4',u:'万',t:'g'},
+  {k:'本月折旧',v:'3.86',u:'万'},{k:'本月已计提',v:'否',t:'w',d:'待计提'},
+])
++card('资产卡片',table(
+ [{t:'卡片编号'},{t:'资产名称'},{t:'类别'},{t:'使用部门'},{t:'开始使用'},{t:'原值',n:1},
+  {t:'使用月数',n:1},{t:'残值率'},{t:'月折旧',n:1},{t:'累计折旧',n:1},{t:'净值',n:1},{t:'状态'}],
+ [
+  ['<span class="code">GD0001</span>','中央空调机组','机器设备','冼村项目','2024-03-15',M(186000),'120','5%',M(1472.5),M(43702.5),M(142297.5),pill('在用','ok')],
+  ['<span class="code">GD0002</span>','电梯（2号楼）','机器设备','冼村项目','2024-03-15',M(240000),'240','5%',M(950),M(28500),M(211500),pill('在用','ok')],
+  ['<span class="code">GD0003</span>','消防系统','机器设备','冼村项目','2024-06-01',M(38000),'120','5%',M(300.83),M(8123.33),M(29876.67),pill('在用','ok')],
+  ['<span class="code">GD0004</span>','办公家具一批','办公设备','行政部','2025-01-10',M(12600),'60','5%',M(199.5),M(3990),M(8610),pill('在用','ok')],
+  ['<span class="code">GD0005</span>','监控设备','电子设备','花都项目','2025-04-20',M(8600),'36','5%',M(226.94),M(3631.11),M(4968.89),pill('在用','ok')],
+  ['<span class="code">GD0006</span>','笔记本电脑×3','电子设备','财务部','2025-09-01',M(18000),'36','5%',M(475),M(5225),M(12775),pill('在用','ok')],
+  ['<span class="code">GD0007</span>','旧空调（已报废）','机器设备','花都项目','2021-05-01',M(22000),'120','5%',M(0),M(22000),M(0),pill('已清理','mu')],
+ ]))
++`<div class="note"><b>月折旧算法（平均年限法）：</b><span class="code">月折旧 =（原值 − 原值×残值率）÷ 使用月数</span>。
+  这是最常用的一种，另外还有工作量法、双倍余额递减法、年数总和法——<b>做不做另外三种，你定</b>。</div>`;
+
+S.facard=()=>head('卡片详情 · GD0001 中央空调机组','新增与编辑用同一张表单。带 * 的必填。','固定资产',
+ `<button class="btn">变动记录</button><button class="btn">折旧明细</button><button class="btn pri">保存</button>`)
++cardp('基本信息',`<div class="f3">
+  <div class="field"><label>卡片编号 *</label><div class="inp mono">GD0001</div></div>
+  <div class="field"><label>资产名称 *</label><div class="inp">中央空调机组</div></div>
+  <div class="field"><label>资产类别 *</label><div class="inp">机器设备</div></div>
+  <div class="field"><label>规格型号</label><div class="inp">格力 RF28WQ/NhA-N</div></div>
+  <div class="field"><label>计量单位</label><div class="inp">台</div></div>
+  <div class="field"><label>数量</label><div class="inp mono">1</div></div>
+  <div class="field"><label>使用部门 *</label><div class="inp">冼村项目</div></div>
+  <div class="field"><label>存放地点</label><div class="inp">冼村复建房六期 F31 栋顶层</div></div>
+  <div class="field"><label>取得方式</label><div class="inp">购入</div></div>
+</div>`)
++cardp('价值与折旧',`<div class="f3">
+  <div class="field"><label>开始使用日期 *</label><div class="inp mono">2024-03-15</div></div>
+  <div class="field"><label>资产原值 *</label><div class="inp mono">186,000.00</div></div>
+  <div class="field"><label>折旧方法 *</label><div class="inp">平均年限法</div></div>
+  <div class="field"><label>预计使用月数 *</label><div class="inp mono">120</div></div>
+  <div class="field"><label>净残值率 *</label><div class="inp mono">5%</div></div>
+  <div class="field"><label>净残值</label><div class="inp mono">9,300.00</div></div>
+  <div class="field"><label>月折旧额</label><div class="inp mono" style="color:var(--accent);font-weight:600">1,472.50</div></div>
+  <div class="field"><label>已计提月数</label><div class="inp mono">29</div></div>
+  <div class="field"><label>累计折旧</label><div class="inp mono">43,702.50</div></div>
+</div>
+<div class="note" style="margin:10px 0 0"><b>月折旧额自动算，不让人手填：</b>（186,000 − 9,300）÷ 120 = 1,472.50。
+手填必然出现算错和改了原值不改折旧的情况。</div>`)
++cardp('入账科目（决定折旧凭证怎么做）',`<div class="f3">
+  <div class="field"><label>资产科目</label><div class="inp mono">1601 固定资产</div></div>
+  <div class="field"><label>累计折旧科目</label><div class="inp mono">1602 累计折旧</div></div>
+  <div class="field"><label>折旧费用科目 *</label><div class="inp mono">560205_2001 管理费用_折旧费_冼村</div></div>
+</div>
+<div class="note" style="margin:10px 0 0"><b>每月计提生成的凭证：</b>
+借 <span class="code">560205_2001 管理费用_折旧费</span> 1,472.50 ／ 贷 <span class="code">1602 累计折旧</span> 1,472.50</div>`);
+
+S.dep=()=>head('折旧计提','每月跑一次，生成折旧清单，确认后回写凭证。','固定资产',
+ `<span class="sel">期间 <b>2026-08</b></span><button class="btn">试算</button><button class="btn pri">计提并生成凭证</button>`)
++`<div class="note w"><b>本月尚未计提。</b>计提前请确认本月的资产增减都已录入——<b>当月增加的资产当月不提，次月起提；当月减少的资产当月照提</b>（这是通行做法，也可改）。</div>`
++kpis([
+  {k:'参与计提资产',v:'27',u:'项'},{k:'本月折旧额',v:M(3862.27),t:'g'},
+  {k:'其中冼村项目',v:M(2723.33)},{k:'其中花都项目',v:M(226.94)},
+  {k:'其中管理部门',v:M(912.00)},{k:'计提状态',v:'未计提',t:'w'},
+])
++card('折旧计提清单 · 2026年8月',table(
+ [{t:'卡片编号'},{t:'资产名称'},{t:'使用部门'},{t:'原值',n:1},{t:'已提月数',n:1},
+  {t:'本月折旧',n:1},{t:'累计折旧',n:1},{t:'净值',n:1},{t:'折旧费用科目'}],
+ [
+  ['<span class="code">GD0001</span>','中央空调机组','冼村项目',M(186000),'29',M(1472.5),M(45175),M(140825),'<span class="code">560205_2001</span>'],
+  ['<span class="code">GD0002</span>','电梯（2号楼）','冼村项目',M(240000),'29',M(950),M(29450),M(210550),'<span class="code">560205_2001</span>'],
+  ['<span class="code">GD0003</span>','消防系统','冼村项目',M(38000),'26',M(300.83),M(8424.16),M(29575.84),'<span class="code">560205_2001</span>'],
+  ['<span class="code">GD0004</span>','办公家具一批','行政部',M(12600),'19',M(199.5),M(4189.5),M(8410.5),'<span class="code">560205</span>'],
+  ['<span class="code">GD0005</span>','监控设备','花都项目',M(8600),'16',M(226.94),M(3858.05),M(4741.95),'<span class="code">560205_1001</span>'],
+  ['<span class="code">GD0006</span>','笔记本电脑×3','财务部',M(18000),'11',M(475),M(5700),M(12300),'<span class="code">560205</span>'],
+  {cls:'mut',d:['','<span class="mut">…（共 27 项）</span>','','','','','','','']},
+ ],
+ ['<b>合计</b>','','',`<b>${M(4862000)}</b>`,'',`<b>${M(3862.27)}</b>`,`<b>${M(1431800)}</b>`,`<b>${M(3430200)}</b>`,'']))
++cardp('将生成的凭证',`<div class="tw"><table>
+  <thead><tr><th>摘要</th><th>科目</th><th class="num">借方</th><th class="num">贷方</th></tr></thead>
+  <tbody>
+   <tr><td>计提8月折旧</td><td><span class="code">560205_2001</span> 管理费用_折旧费_冼村</td><td class="num">${M(2723.33)}</td><td class="num"></td></tr>
+   <tr><td>计提8月折旧</td><td><span class="code">560205_1001</span> 管理费用_折旧费_花都</td><td class="num">${M(226.94)}</td><td class="num"></td></tr>
+   <tr><td>计提8月折旧</td><td><span class="code">560205</span> 管理费用_折旧费</td><td class="num">${M(912.00)}</td><td class="num"></td></tr>
+   <tr><td>计提8月折旧</td><td><span class="code">1602</span> 累计折旧</td><td class="num"></td><td class="num">${M(3862.27)}</td></tr>
+  </tbody>
+  <tfoot><tr><td colspan="2"><b>合计</b></td><td class="num"><b>${M(3862.27)}</b></td><td class="num"><b>${M(3862.27)}</b></td></tr></tfoot>
+  </table></div>
+  <div class="note g" style="margin:11px 0 0"><b>按折旧费用科目自动归集分录</b>，同科目合并成一行。生成后进凭证列表，仍需人工复核过账。</div>`);
+
+S.dept=()=>head('折旧明细表','按部门、按科目、按资产类别三个口径汇总。给经营会和成本分析用。','固定资产',
+ `<span class="sel">口径 <b>按部门</b></span><span class="sel">期间 <b>2026-08</b></span><button class="btn pri">导出</button>`)
++card('折旧明细表 · 按使用部门',table(
+ [{t:'使用部门'},{t:'资产数',n:1},{t:'原值',n:1},{t:'本月折旧',n:1},{t:'本年累计折旧',n:1},{t:'累计折旧',n:1},{t:'净值',n:1}],
+ [
+  ['冼村项目','12',M(3860000),M(2723.33),M(21786.64),M(1082400),M(2777600)],
+  ['花都项目','8',M(486000),M(226.94),M(1815.52),M(198600),M(287400)],
+  ['行政部','5',M(386000),M(199.5),M(1596),M(98600),M(287400)],
+  ['财务部','2',M(130000),M(712.5),M(5700),M(52200),M(77800)],
+ ],
+ ['<b>合计</b>','<b>27</b>',`<b>${M(4862000)}</b>`,`<b>${M(3862.27)}</b>`,`<b>${M(30898.16)}</b>`,`<b>${M(1431800)}</b>`,`<b>${M(3430200)}</b>`]))
++`<div class="note"><b>摊销用同一套：</b>无形资产、长期待摊费用的摊销机制与折旧完全一样——
+  卡片 + 每月计提 + 回写凭证，只是科目不同（1701 无形资产 / 1801 长期待摊费用）。
+  <b>建议合并成一个模块，不单独做「摊销模块」</b>，否则两套代码维护两遍。</div>`;
+
+/* ══════ 报表中心 ══════ */
+S.rpt=()=>head('报表中心','四张表，全部按公开准则模板。数据来自账簿，账簿来自凭证。','报表中心',
+ `<span class="sel">期间 <b>2026-08</b></span><button class="btn">批量生成</button>`)
++`<div class="note c"><b>生成前的强校验：</b>① 期末借贷必须平衡 ② 本月折旧必须已计提 ③ 无未过账凭证。
+  <b>任一不满足就禁止生成</b>——出一张自己都不信的报表，比不出更糟。</div>`
++`<div class="rptgrid">
+  <button class="rpt" data-s="bs"><div class="n">资产负债表</div>
+    <div class="d">时点表。年初余额 vs 期末余额，反映家底。</div>
+    <div class="m">资产 = 负债 + 所有者权益</div></button>
+  <button class="rpt" data-s="pl"><div class="n">利润表</div>
+    <div class="d">期间表。本期金额 vs 本年累计，反映赚了多少。</div>
+    <div class="m">收入 − 成本费用 = 利润</div></button>
+  <button class="rpt" data-s="cf"><div class="n">现金流量表</div>
+    <div class="d">期间表。经营/投资/筹资三类活动的现金进出。</div>
+    <div class="m">最难做的一张，见页内说明</div></button>
+  <button class="rpt" data-s="exp"><div class="n">费用明细表</div>
+    <div class="d">管理层最常看。科目 × 部门 × 项目三维。</div>
+    <div class="m">不属三大表，但更常用</div></button>
+</div>`
++cardp('生成前检查',`<div class="tw"><table>
+ <thead><tr><th>检查项</th><th>结果</th><th>说明</th></tr></thead><tbody>
+ <tr><td>期末借贷平衡</td><td>${pill('通过','ok')}</td><td class="mut">1,861,952.11 = 1,861,952.11</td></tr>
+ <tr><td>本月折旧已计提</td><td>${pill('未通过','cr')}</td><td class="mut">8 月折旧尚未计提，利润表会少 3,862.27 费用</td></tr>
+ <tr><td>无未过账凭证</td><td>${pill('未通过','wa')}</td><td class="mut">14 张待审核</td></tr>
+ <tr><td>计提类凭证齐全</td><td>${pill('待确认','wa')}</td><td class="mut">T2 只处理银行流水，不含计提/结转</td></tr>
+ </tbody></table></div>`);
+
+S.bs=()=>head('资产负债表','时点表，标准格式。左资产、右负债与所有者权益。','报表中心 · 会企01表',
+ `<span class="sel">期间 <b>2026-08-31</b></span><button class="btn">打印</button><button class="btn pri">导出</button>`)
++`<div class="cols c2">
+${card('资产',table([{t:'项目'},{t:'期末余额',n:1},{t:'年初余额',n:1}],[
+  {cls:'lv1',d:['<b>流动资产：</b>','','']},
+  {cls:'lv2',d:['货币资金',M(453745),M(386200)]},
+  {cls:'lv2',d:['应收账款',M(113433.8),M(224680)]},
+  {cls:'lv2',d:['其他应收款',M(12800),M(9600)]},
+  {cls:'lv2',d:['预付账款',M(0),M(0)]},
+  {cls:'sum',d:['<b>流动资产合计</b>',`<b>${M(579978.8)}</b>`,`<b>${M(620480)}</b>`]},
+  {cls:'lv1',d:['<b>非流动资产：</b>','','']},
+  {cls:'lv2',d:['固定资产原值',M(4862000),M(4862000)]},
+  {cls:'lv2',d:['减：累计折旧',M(1431800),M(1400901.84)]},
+  {cls:'lv2',d:['固定资产净值',M(3430200),M(3461098.16)]},
+  {cls:'sum',d:['<b>非流动资产合计</b>',`<b>${M(3430200)}</b>`,`<b>${M(3461098.16)}</b>`]},
+  {cls:'sum',d:['<b>资产总计</b>',`<b>${M(4010178.8)}</b>`,`<b>${M(4081578.16)}</b>`]},
+]))}
+${card('负债和所有者权益',table([{t:'项目'},{t:'期末余额',n:1},{t:'年初余额',n:1}],[
+  {cls:'lv1',d:['<b>流动负债：</b>','','']},
+  {cls:'lv2',d:['应付账款',M(42600),M(38400)]},
+  {cls:'lv2',d:['其他应付款',M(98000),M(86400)]},
+  {cls:'lv2',d:['应付职工薪酬',M(9925),M(0)]},
+  {cls:'lv2',d:['应交税费',M(4286.5),M(2840)]},
+  {cls:'sum',d:['<b>流动负债合计</b>',`<b>${M(154811.5)}</b>`,`<b>${M(127640)}</b>`]},
+  {cls:'lv1',d:['<b>所有者权益：</b>','','']},
+  {cls:'lv2',d:['实收资本',M(3000000),M(3000000)]},
+  {cls:'lv2',d:['未分配利润',M(855367.3),M(953938.16)]},
+  {cls:'sum',d:['<b>所有者权益合计</b>',`<b>${M(3855367.3)}</b>`,`<b>${M(3953938.16)}</b>`]},
+  {cls:'sum',d:['<b>负债和所有者权益总计</b>',`<b>${M(4010178.8)}</b>`,`<b>${M(4081578.16)}</b>`]},
+]))}
+</div>`
++`<div class="note g"><b>平衡校验：</b>资产总计 4,010,178.80 = 负债和所有者权益总计 4,010,178.80 ✓
+  <b>不平就不出表</b>，直接指出是哪个科目没归到报表项目。</div>`
++`<div class="note w"><b>本表依赖折旧已计提。</b>8 月折旧尚未计提，累计折旧和净值是上月数——已在页面顶部标出。</div>`;
+
+S.pl=()=>head('利润表','期间表。本期金额 vs 本年累计金额。','报表中心 · 会企02表',
+ `<span class="sel">期间 <b>2026-08</b></span><button class="btn">打印</button><button class="btn pri">导出</button>`)
++card('利润表 · 2026年8月',table(
+ [{t:'项目'},{t:'本期金额',n:1},{t:'本年累计金额',n:1}],
+ [
+  {cls:'lv1',d:['一、营业收入',M(14455.44),M(1857055)]},
+  {cls:'lv2',d:['其中：主营业务收入',M(14455.44),M(1857055)]},
+  {cls:'lv2',d:['　　　其他业务收入',M(0),M(0)]},
+  {cls:'lv1',d:['减：营业成本',M(124930),M(1111330)]},
+  {cls:'lv2',d:['其中：其他业务成本',M(124930),M(1111330)]},
+  {cls:'lv2',d:['　　　税金及附加',M(144.55),M(18570.55)]},
+  {cls:'lv2',d:['　　　销售费用',M(0),M(0)]},
+  {cls:'lv2',d:['　　　管理费用',M(37008),M(179808)]},
+  {cls:'lv2',d:['　　　财务费用',M(353.57),M(3193.57)]},
+  {cls:'sum',d:['<b>二、营业利润</b>',`<b class="red">${M(-147980.68)}</b>`,`<b>${M(544152.88)}</b>`]},
+  {cls:'lv2',d:['加：营业外收入',M(0),M(0)]},
+  {cls:'lv2',d:['减：营业外支出',M(0),M(0)]},
+  {cls:'sum',d:['<b>三、利润总额</b>',`<b class="red">${M(-147980.68)}</b>`,`<b>${M(544152.88)}</b>`]},
+  {cls:'lv2',d:['减：所得税费用',M(0),M(0)]},
+  {cls:'sum',d:['<b>四、净利润</b>',`<b class="red">${M(-147980.68)}</b>`,`<b>${M(544152.88)}</b>`]},
+ ]))
++`<div class="note c"><b>本期为什么是负的：</b>8 月只入了银行流水凭证——付业主租金 124,930 全额进了成本，
+  但<b>对应的租金收入还挂在应收里没确认</b>（提现只冲应收）。这不是算错，是<b>凭证不全</b>。
+  等计提类凭证补齐，本期数才有意义。<b>工具会把这个原因直接写在表上，不让人误读。</b></div>`;
+
+S.cf=()=>head('现金流量表','期间表。经营、投资、筹资三类活动。','报表中心 · 会企03表',
+ `<span class="sel">期间 <b>2026-08</b></span><span class="sel">方法 <b>直接法</b></span><button class="btn pri">导出</button>`)
++`<div class="note c"><b>三张表里最难做的一张，先把话说在前面。</b>
+  现金流量表要求把每一笔现金收支归到「经营/投资/筹资」某一类，而<b>凭证本身不带这个标记</b>。
+  两条路：① 按科目对照表自动归类（快，但遇到复杂业务会归错）② 在凭证上加现金流量项目标记（准，但每张凭证都要多填一个字段）。
+  <b>建议先用①，把归不了类的单独列出来人工指定</b>——和 T2 处理例外一个思路。</div>`
++card('现金流量表 · 2026年8月（直接法）',table(
+ [{t:'项目'},{t:'本期金额',n:1},{t:'本年累计',n:1}],
+ [
+  {cls:'lv1',d:['<b>一、经营活动产生的现金流量</b>','','']},
+  {cls:'lv2',d:['销售商品、提供劳务收到的现金',M(131146),M(1284600)]},
+  {cls:'lv2',d:['收到的其他与经营活动有关的现金',M(9000),M(86400)]},
+  {cls:'sum',d:['现金流入小计',`<b>${M(140146)}</b>`,`<b>${M(1371000)}</b>`]},
+  {cls:'lv2',d:['购买商品、接受劳务支付的现金',M(124930),M(1111330)]},
+  {cls:'lv2',d:['支付给职工以及为职工支付的现金',M(24241),M(186400)]},
+  {cls:'lv2',d:['支付的各项税费',M(113.52),M(18684.07)]},
+  {cls:'lv2',d:['支付的其他与经营活动有关的现金',M(19746.31),M(64200)]},
+  {cls:'sum',d:['现金流出小计',`<b>${M(169030.83)}</b>`,`<b>${M(1380614.07)}</b>`]},
+  {cls:'sum',d:['<b>经营活动产生的现金流量净额</b>',`<b class="red">${M(-28884.83)}</b>`,`<b class="red">${M(-9614.07)}</b>`]},
+  {cls:'lv1',d:['<b>二、投资活动产生的现金流量</b>','','']},
+  {cls:'lv2',d:['购建固定资产支付的现金',M(0),M(0)]},
+  {cls:'sum',d:['<b>投资活动产生的现金流量净额</b>',`<b>${M(0)}</b>`,`<b>${M(0)}</b>`]},
+  {cls:'lv1',d:['<b>三、筹资活动产生的现金流量</b>','','']},
+  {cls:'lv2',d:['吸收投资收到的现金',M(0),M(0)]},
+  {cls:'sum',d:['<b>筹资活动产生的现金流量净额</b>',`<b>${M(0)}</b>`,`<b>${M(0)}</b>`]},
+  {cls:'sum',d:['<b>四、现金及现金等价物净增加额</b>',`<b class="red">${M(-28884.83)}</b>`,`<b class="red">${M(-9614.07)}</b>`]},
+  {cls:'lv2',d:['加：期初现金及现金等价物余额',M(482629.83),M(463359.07)]},
+  {cls:'sum',d:['<b>五、期末现金及现金等价物余额</b>',`<b>${M(453745)}</b>`,`<b>${M(453745)}</b>`]},
+ ]))
++`<div class="note g"><b>勾稽校验：</b>期末现金 453,745.00 必须等于资产负债表「货币资金」453,745.00 ✓
+  这是现金流量表唯一的硬校验，对不上就是归类漏了或重了。</div>`;
+
+S.exp=()=>head('费用明细表','不属三大表，但管理层看得最多。科目 × 部门 × 项目三个维度。','报表中心',
+ `<span class="sel">维度 <b>科目 × 项目</b></span><span class="sel">期间 <b>2026-08</b></span>
+  <button class="btn">切到按部门</button><button class="btn pri">导出</button>`)
++kpis([
+  {k:'本月费用合计',v:M(37361.57)},{k:'较上月',v:'+8.4%',t:'w'},
+  {k:'冼村项目',v:M(20353.57),d:'占 54.5%'},{k:'花都项目',v:M(14246.74),d:'占 38.1%'},
+  {k:'公共分摊',v:M(2761.26),d:'占 7.4%'},
+])
++card('费用明细表 · 科目 × 项目',table(
+ [{t:'费用科目'},{t:'冼村复建房六期',n:1},{t:'花都UU公寓',n:1},{t:'公共/未分摊',n:1},{t:'合计',n:1},{t:'占比'},{t:'上月',n:1},{t:'环比'}],
+ [
+  ['<span class="code">560202</span> 房租',M(0),M(6050),M(0),M(6050),'16.2%',M(6050),'0.0%'],
+  ['<span class="code">560204</span> 水电费',M(0),M(7496.74),M(0),M(7496.74),'20.1%',M(6842),'<span class="red">+9.6%</span>'],
+  ['<span class="code">560206</span> 清洁费',M(0),M(700),M(0),M(700),'1.9%',M(700),'0.0%'],
+  ['<span class="code">560209</span> 工资',M(15000),M(0),M(9925),M(24925),'66.7%',M(22800),'<span class="red">+9.3%</span>'],
+  ['<span class="code">560223</span> 服务费',M(5000),M(0),M(0),M(5000),'13.4%',M(5000),'0.0%'],
+  ['<span class="code">560303</span> 手续费',M(353.57),M(0),M(9),M(362.57),'1.0%',M(286),'<span class="red">+26.8%</span>'],
+  {cls:'mut',d:['<span class="code">560205</span> 折旧费','<span class="mut">待计提</span>','<span class="mut">待计提</span>','<span class="mut">待计提</span>','<span class="mut">—</span>','','','']},
+ ],
+ ['<b>合计</b>',`<b>${M(20353.57)}</b>`,`<b>${M(14246.74)}</b>`,`<b>${M(9934)}</b>`,`<b>${M(44534.31)}</b>`,'100%',`<b>${M(41678)}</b>`,'<b class="red">+6.9%</b>']))
++`<div class="note w"><b>折旧费那一行是空的</b>，因为 8 月还没计提。这也说明<b>固定资产模块必须排在报表之前</b>——
+  否则费用表永远缺一块，而且缺的这块通常还不小。</div>`;
+
+/* ══════ 经营看板 ══════ */
+const ENTS=[
+ {n:'优栖',f:'优栖（广州）服务管理',rev:14455,pft:-147980,cash:453745,ar:113434,risk:'c',
+  sp:[62,58,71,66,74,69,55,41],note:'凭证不全，本期为负'},
+ {n:'澳乐',f:'广州澳乐电子商务科技',rev:1062000,pft:142000,cash:727200,ar:284600,risk:'g',sp:[48,52,55,61,58,66,72,78]},
+ {n:'东蓓',f:'东蓓',rev:242000,pft:33800,cash:131600,ar:86400,risk:'w',sp:[55,51,48,52,49,46,44,42],note:'覆盖倍数 1.18 触红线'},
+ {n:'数智云仓',f:'广州数智云仓产业园运营',rev:48000,pft:13200,cash:288200,ar:42800,risk:'g',sp:[40,42,45,44,48,50,52,54]},
+ {n:'集包厂',f:'集包厂',rev:124000,pft:17800,cash:313000,ar:64200,risk:'g',sp:[58,60,57,62,65,63,68,70]},
+ {n:'云迪',f:'广州云迪物业管理服务',rev:0,pft:0,cash:40000,ar:0,risk:'w',sp:[0,0,0,0,0,0,0,12],note:'刚起步，仅 3 笔流水'},
+];
+const spark=a=>`<div class="spark">${a.map((v,i)=>`<i class="${i===a.length-1?'hi':''}" style="height:${Math.max(4,v)}%"></i>`).join('')}</div>`;
+const barh=(l,p,v,c)=>`<div class="bar-h"><span class="lb">${H(l)}</span><span class="tr"><i class="${c||''}" style="width:${Math.max(0,Math.min(100,p))}%"></i></span><span class="vv">${v}</span></div>`;
+
+S.dash=()=>head('经营看板','老板视角：一屏看完所有主体。<b>每张卡点进去就是该主体的账簿与报表</b>——看板与账务前后打通，不是两套数。','分析 · M7',
+ `<span class="sel">期间 <b>2026-08</b></span><span class="sel">口径 <b>管理报表</b></span><button class="btn">导出</button>`)
++kpis([
+ {k:'在营主体',v:'6',u:'/ 37',d:'其余未启用'},
+ {k:'合并收入',v:'149.0',u:'万'},
+ {k:'合并利润',v:'5.9',u:'万',t:'w'},
+ {k:'资金总额',v:'195.4',u:'万'},
+ {k:'应收余额',v:'59.1',u:'万'},
+ {k:'风险主体',v:'3',u:'家',t:'c'},
+])
++`<div class="note c"><b>看板只呈现，不粉饰。</b>数据来自账簿，账簿来自凭证——<b>凭证不全的主体会明确标出来</b>，
+ 而不是给一个看起来正常的数。下面优栖那张卡就是例子。</div>`
++cardp('各主体经营概况（点卡片进该主体账簿）',`<div class="bcards">${ENTS.map(e=>`
+ <button class="bc ${e.risk}" data-s="bs">
+   <div class="en">${H(e.n)}</div><div class="sub3">${H(e.f)}</div>
+   <div class="big" style="color:${e.pft<0?'var(--crit)':'var(--text)'}">${e.pft<0?'-':''}${M(Math.abs(e.pft)/10000)}<small style="font-size:11px;color:var(--text-3)"> 万利润</small></div>
+   <div class="row2"><span>收入</span><b>${M(e.rev/10000)} 万</b></div>
+   <div class="row2"><span>资金</span><b>${M(e.cash/10000)} 万</b></div>
+   <div class="row2"><span>应收</span><b>${M(e.ar/10000)} 万</b></div>
+   ${spark(e.sp)}
+   ${e.note?`<div style="margin-top:7px">${pill(e.note,e.risk==='c'?'cr':'wa')}</div>`:''}
+ </button>`).join('')}</div>`)
++`<div class="cols c2">
+ ${cardp('收入构成（按主体）',ENTS.filter(e=>e.rev>0).sort((a,b)=>b.rev-a.rev).map(e=>
+   barh(e.n,e.rev/1062000*100,M(e.rev/10000)+' 万')).join(''))}
+ ${cardp('需要老板关注的事',`<div class="alerts">
+   <div class="al c"><span class="ai">⚑</span><div><b>东蓓资金覆盖倍数 1.18</b><br>
+     <span class="mut">低于 1.5 倍红线。月固定支出 112 万，账面 131.6 万。</span></div></div>
+   <div class="al c"><span class="ai">⚑</span><div><b>优栖 8 月账面亏损 14.8 万</b><br>
+     <span class="mut">凭证不全所致——租金收入挂应收未确认，成本已全额入账。非真实亏损。</span></div></div>
+   <div class="al"><span class="ai">◷</span><div><b>3 家主体本月折旧未计提</b><br>
+     <span class="mut">利润表少计费用，报表暂不可用于对外。</span></div></div>
+   <div class="al"><span class="ai">◉</span><div><b>云迪收到出资 4 万（李堪珍）</b><br>
+     <span class="mut">合伙人资金动作，已触发独立报告线，请确认出资手续齐备。</span></div></div>
+ </div>`)}
+</div>`
++`<div class="note"><b>「前后联通」怎么实现：</b>看板不另存一份数——
+ 卡片上的每个数字都能<b>点下去看到出处</b>：利润→利润表→科目余额表→明细账→那张凭证→那笔银行流水。
+ 一条链到底，中间没有人工搬运，所以老板看到的数和会计做的账<b>永远是同一份</b>。</div>`;
+
+S.drill=()=>head('下钻路径','这是看板可信的关键。任何一个数都能一路点到原始凭证。','分析 · 设计说明')
++`<div class="chain">
+ <div class="cn now"><div class="t2">看板</div><div class="d2">优栖 利润 -14.8 万</div></div>
+ <div class="cn"><div class="t2">利润表</div><div class="d2">营业成本 124,930</div></div>
+ <div class="cn"><div class="t2">科目余额表</div><div class="d2">5402 其他业务成本</div></div>
+ <div class="cn"><div class="t2">明细账</div><div class="d2">记-1 逐笔 24 行</div></div>
+ <div class="cn"><div class="t2">凭证</div><div class="d2">冼村31号607黄巧嫦</div></div>
+ <div class="cn"><div class="t2">银行流水</div><div class="d2">跨行汇款 6,080</div></div>
+</div>`
++`<div class="note g"><b>六层，每层都可点。</b>老板问「这 14.8 万亏在哪」，不用回去问会计——自己点四下就看到是付给黄巧嫦的 6,080 元房租。</div>`
++`<div class="cols c2">
+ ${cardp('看板取数来源',table([{t:'看板指标'},{t:'来自'},{t:'再往上'}],[
+   ['收入 / 利润','利润表','科目余额表 → 凭证'],
+   ['资金','T1 资金日报 + 银行存款科目','银行流水'],
+   ['应收','科目余额表 1122','明细账 → 凭证'],
+   ['风险标记','T1 红线 + 月结检查单','各自规则'],
+   ['趋势条','总分类账逐月','明细账'],
+ ]))}
+ ${cardp('不做的三件事',table([{t:'不做'},{t:'为什么'}],[
+   ['看板单独存一份汇总数','两份数必然对不上，且没人知道该信哪份'],
+   ['凭证不全时给"预估值"','预估值会被当成真实经营结果讨论'],
+   ['为了好看做同比环比','数据只有 8 个月且口径变过，同比无意义'],
+ ]))}
+</div>`;
+
+const NAV=[
+ ['plan','总览'],['—经营看板'],['dash','经营看板'],['drill','下钻路径'],['—账簿'],['bal','科目余额表'],['detail','明细账'],['gl','总分类账'],
+ ['—固定资产'],['fa','资产卡片'],['facard','卡片详情'],['dep','折旧计提'],['dept','折旧明细表'],
+ ['—报表中心'],['rpt','报表首页'],['bs','资产负债表'],['pl','利润表'],['cf','现金流量表'],['exp','费用明细表'],
+];
+let cur='plan';
+function render(){
+  document.getElementById('nav').innerHTML=NAV.map(x=>
+    x.length===1?`<span class="gp">${x[0]}</span>`
+    :`<button data-s="${x[0]}" class="${x[0]===cur?'on':''}">${x[1]}</button>`).join('');
+  document.getElementById('view').innerHTML=S[cur]();
+  window.scrollTo({top:0,behavior:'instant'});
+}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-s]');if(b){cur=b.dataset.s;render();}});
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  const r=document.documentElement,c=r.getAttribute('data-theme');
+  const sys=matchMedia('(prefers-color-scheme: dark)').matches;
+  r.setAttribute('data-theme',(c||(sys?'dark':'light'))==='dark'?'light':'dark');
+});
+render();
+</script>
+</body>
+</html>

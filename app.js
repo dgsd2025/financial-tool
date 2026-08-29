@@ -55,10 +55,11 @@ const DOMS = [
       ['tool-list', '我的工具'], ['t1', 'T1 资金日报'], ['t2', 'T2 流水转凭证'], ['t3', 'T3 对账核对'], ['t4', 'T4 日损益'],
       ['tool-rules', '规则库'], ['tool-log', '处理记录'], ['tool-plan', '开发排期'] ] },
   { id: 'fund', n: '资金', ic: '◈', ready: 1, items: [['fd-banks', '网银入口'], ['p-fund-daily', '资金日报'], ['p-fund-account', '账户与U盾'], ['p-fund-recon', '流水与对账'], ['p-pay', '付款申请']] },
-  { id: 'inv', n: '票据', ic: '▼', ready: 1, items: [
+  { id: 'inv', n: '纳税申报', ic: '▼', ready: 1, items: [
       ['iv-in', '进项票'], ['iv-out', '销项票'], ['iv-noinv', '无票收入'],
       ['--纳税申报'],
-      ['iv-vat', '增值税申报'], ['iv-cit', '所得税申报'], ['iv-stamp', '印花税申报'], ['iv-portal', '电子税务局'] ] },
+      ['iv-vat', '增值税申报'], ['iv-cit', '所得税申报'], ['iv-stamp', '印花税申报'],
+      ['iv-iit', '个税申报'], ['iv-social', '社保申报'], ['iv-dbf', '残保金申报'], ['iv-portal', '电子税务局'] ] },
   { id: 'ar', n: '应收', ic: '◫', items: [['p-ar-contract', '合同台账'], ['p-ar-bill', '应收账单'], ['p-ar-claim', '收款认领'], ['p-ar-aging', '账龄与催收']] },
   { id: 'cost', n: '费控', ic: '▧', items: [['p-exp', '报销与费控'], ['p-flow', '审批路由']] },
   { id: 'close', n: '核算', ic: '▩', ready: 1, items: [
@@ -345,6 +346,9 @@ const acctName = code => {
     const bh = list.find(a => a[0] === base);
     if (bh) return bh[1];
   }
+  // 反向：查无后缀的基础码（560209），但科目表里存的是模板（560209_{p}）
+  const th = list.find(a => String(a[0]).includes('{p}') && String(a[0]).split('_')[0] === String(code));
+  if (th) return th[1];
   return '';
 };
 /** 对方户名是否业主；是则返回项目代码 */

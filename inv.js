@@ -103,7 +103,7 @@ function ivPool(dir) {
     x.amt < 0 ? pill('红冲', 'cr') : pill(x.state, 'ok'),
     `<button class="btn sm" data-ivdel="${dir}:${H(x.no)}">删除</button>`,
   ]);
-  return head(title, `${H(entName())} · ${isIn ? '供应商开给我们的票（抵扣/入成本用）' : '我们开出去的票（算销售额用）'}。同号自动查重，作废票剔除，红冲负数原样进池。`, '票据 · ' + IV.month,
+  return head(title, `${H(entName())} · ${isIn ? '供应商开给我们的票（抵扣/入成本用）' : '我们开出去的票（算销售额用）'}。同号自动查重，作废票剔除，红冲负数原样进池。`, '纳税申报 · ' + IV.month,
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
      <button class="btn pri" data-act="ivUp${isIn ? 'In' : 'Out'}">导入${title}</button>`)
     + kpis([
@@ -134,7 +134,7 @@ S['iv-noinv'] = () => {
     money(x.net), money(x.tax),
     `<button class="btn sm" data-ivdel="noinv:${H(x.id)}">删除</button>`,
   ]);
-  return head('无票收入', `${H(entName())} · 收了钱没开票的收入也要申报。录含税金额，按征收率自动拆不含税与税额，进增值税申报表的销售额。`, '票据 · ' + IV.month,
+  return head('无票收入', `${H(entName())} · 收了钱没开票的收入也要申报。录含税金额，按征收率自动拆不含税与税额，进增值税申报表的销售额。`, '纳税申报 · ' + IV.month,
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">`)
     + kpis([
       { k: '本月笔数', v: String(cur.length), u: '笔' },
@@ -220,7 +220,7 @@ S['iv-vat'] = () => {
     ];
   }
   return head('增值税及附加税费申报表' + (p.type === 'small' ? '（小规模纳税人适用）' : '（一般纳税人适用）'),
-    `${H(entName())} · 税款所属期 ${IV.month}。销售额 = 销项票 + 无票收入${p.type === 'general' ? '，抵扣 = 进项票 + 上期留抵' : ''}。`, '票据 · 纳税申报',
+    `${H(entName())} · 税款所属期 ${IV.month}。销售额 = 销项票 + 无票收入${p.type === 'general' ? '，抵扣 = 进项票 + 上期留抵' : ''}。`, '纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
      <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="ivVchVat">生成凭证</button>
      <button class="btn pri" data-act="ivExpVat">导出</button>`)
@@ -263,7 +263,7 @@ S['iv-cit'] = () => {
   const pay = Math.max(0, +(due - paid).toFixed(2));
   const F = (nm, v, cls) => ({ cls: cls || '', d: [nm, typeof v === 'number' ? money(v) : v] });
   return head('企业所得税月（季）度预缴纳税申报表（A类）',
-    `${H(entName())} · ${q.y} 年第 ${q.q} 季度（累计 ${q.y}-01-01 起）。${note}。`, '票据 · 纳税申报',
+    `${H(entName())} · ${q.y} 年第 ${q.q} 季度（累计 ${q.y}-01-01 起）。${note}。`, '纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
      <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="ivVchCit">生成凭证</button>
      <button class="btn pri" data-act="ivExpCit">导出</button>`)
@@ -325,7 +325,7 @@ S['iv-stamp'] = () => {
       `<input type="number" step="0.01" data-stamp="${it[0]}" value="${adj[it[0]] || ''}" placeholder="0.00" style="width:150px">`,
       money(tax)];
   });
-  return head('印花税申报表', `${H(entName())} · 税款所属期 ${IV.month}。计税金额按合同/账簿实际填，右侧税额实时算${k === 0.5 ? '（小规模六税两费减半已含）' : ''}。`, '票据 · 纳税申报',
+  return head('印花税申报表', `${H(entName())} · 税款所属期 ${IV.month}。计税金额按合同/账簿实际填，右侧税额实时算${k === 0.5 ? '（小规模六税两费减半已含）' : ''}。`, '纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
      <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="stampSave">保存</button>
      <button class="btn" data-act="ivVchStamp">生成凭证</button>
@@ -342,7 +342,7 @@ S['iv-stamp'] = () => {
 /* ============ 电子税务局入口 ============ */
 /* 只放官方 chinatax.gov.cn 域名的链接——报税入口是钓鱼重灾区，
    别用搜索引擎搜「电子税务局登录」。广州企业在广东省电子税务局申报。 */
-S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申报表是草稿，最终以电子税务局生成并提交的为准。', '票据 · 纳税申报')
+S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申报表是草稿，最终以电子税务局生成并提交的为准。', '纳税申报')
   + `<div class="note"><b>认准官方域名 chinatax.gov.cn。</b>别用搜索引擎搜「电子税务局登录」——钓鱼站最爱做这个入口。登录用电子营业执照 / 实名账号，证书问题打 12366。</div>`
   + `<div class="bankgrid">
     <a class="bank" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#c7000b">
@@ -355,6 +355,110 @@ S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申�
       <span class="bi0">12</span><span class="bn">12366 纳税服务平台</span><span class="bu">12366.chinatax.gov.cn</span></a>
   </div>`
   + `<div class="note" style="margin-top:12px"><b>报税顺序建议：</b>票据导进销项票、录无票收入 → 增值税/印花税申报表核对生成凭证 → 所得税申报表 → 打开电子税务局照着草稿填 → 回凭证库把税费凭证过账。</div>`;
+
+/* ============ 个税 / 社保 / 残保金申报 ============ */
+/* 三个申报的基数都从账上取（与三大报表同一份数）：
+   工资基数 = 本月 2211 应付职工薪酬贷方发生（计提数）
+            + 名称含「工资/薪酬」的费用科目借方发生（未走计提、直接进费用的部分）
+   这条数就是利润表「管理费用」里的工资，申报、报表、账三处永远一个数。
+   逐人明细系统里没有（没有员工档案），在官方端做——页面只备底数与勾稽。 */
+function ivWageBase(m) {
+  const a = m + '-01';
+  const b = m + '-' + String(new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate()).padStart(2, '0');
+  const net = rptNet(CUR_ENT, a, b, AC.inc);
+  // 工资总额 = 费用侧工资科目借方发生（计提分录也借费用，所以它已含计提数，
+  // 不能再把 2211 贷方加一遍——那是重复计）。2211 只用来拆「经计提 / 未计提直发」。
+  let expense = 0, accrual = 0;
+  Object.keys(net).forEach(k => {
+    if (/^2211/.test(k)) accrual += net[k].cr - net[k].dr;
+    // rptNet 的名称截掉了下划线后半段，判「工资」用科目设置里的全名
+    else if (/^5/.test(k) && /(工资|薪酬|薪金)/.test(acctName(k) || net[k].name || '')) expense += net[k].dr - net[k].cr;
+  });
+  accrual = Math.min(accrual, expense);
+  return { accrual: +accrual.toFixed(2), direct: +(expense - accrual).toFixed(2), total: +expense.toFixed(2) };
+}
+const IV_PORTALS = {
+  its: ['自然人电子税务局（个税扣缴）', 'https://its.chinatax.gov.cn', '#c7000b', '税'],
+  etax: ['广东省电子税务局（社保费/残保金）', 'https://etax.guangdong.chinatax.gov.cn', '#00509e', '粤'],
+  rs: ['广东人社 12333 服务平台', 'https://gd.12333.gov.cn', '#009944', '社'],
+};
+const ivPortalCards = keys => `<div class="bankgrid">${keys.map(k => { const p = IV_PORTALS[k];
+  return `<a class="bank" href="${p[1]}" target="_blank" rel="noopener noreferrer" style="--bc:${p[2]}">
+    <span class="bi0">${p[3]}</span><span class="bn">${p[0]}</span><span class="bu">${p[1].replace('https://', '')}</span></a>`; }).join('')}</div>`;
+const ivTieNote = w => `<div class="note"><b>与三大报表的勾稽：</b>本页基数取自账上工资科目本月发生
+  （其中经计提 ${money(w.accrual)}、未计提直发 ${money(w.direct)}），与利润表「管理费用」同源同数；
+  申报后生成的计提凭证回凭证库，自动进资产负债表（应交/应付）与利润表（费用）。只放官方
+  chinatax.gov.cn / 12333.gov.cn 域名，别用搜索引擎搜申报入口。</div>`;
+
+S['iv-iit'] = () => {
+  if (!CUR_ENT) return needEnt('个税申报');
+  const w = ivWageBase(IV.month);
+  return head('个人所得税申报', `${H(entName())} · 税款所属期 ${IV.month}。逐人算税在自然人电子税务局扣缴端做，本页备账上底数与勾稽。`, '纳税申报',
+    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">`)
+    + kpis([
+      { k: '本月工资基数（账上）', v: money(w.total), t: 'g' },
+      { k: '其中：经计提（2211）', v: money(w.accrual) },
+      { k: '未计提直发', v: money(w.direct) },
+    ])
+    + ivTieNote(w)
+    + `<div class="note w"><b>申报口径提醒：</b>扣缴端里逐人的「本期收入」合计应与上面基数对得上；
+      对不上通常是有工资走了别的科目或月末没计提——先回凭证库补齐再申报。个税于次月 15 日前申报。</div>`
+    + ivPortalCards(['its']);
+};
+
+S['iv-social'] = () => {
+  if (!CUR_ENT) return needEnt('社保申报');
+  const w = ivWageBase(IV.month);
+  return head('社保申报', `${H(entName())} · 费款所属期 ${IV.month}。缴费基数按社保核定为准，本页备账上工资参考与勾稽。`, '纳税申报',
+    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">`)
+    + kpis([
+      { k: '本月工资基数（账上）', v: money(w.total), t: 'g' },
+      { k: '其中：经计提（2211）', v: money(w.accrual) },
+      { k: '未计提直发', v: money(w.direct) },
+    ])
+    + ivTieNote(w)
+    + `<div class="note">广州常用比例（单位侧，以核定为准）：养老 15%（省政策浮动）· 医疗+生育约 6.85% ·
+      失业 0.32%〜0.8% · 工伤按行业 0.1%〜0.95%。社保费在广东已由税务征收，
+      在电子税务局「社保费申报」模块办；单位缴纳部分入账走 借 管理费用/贷 2211，去录凭证补计提。</div>`
+    + ivPortalCards(['etax', 'rs']);
+};
+
+S['iv-dbf'] = () => {
+  if (!CUR_ENT) return needEnt('残保金申报');
+  const y = IV.month.slice(0, 4);
+  const key = 'dbf' + y;
+  const adj = ivAdj(key);
+  const w = ivWageBase(IV.month);
+  // 年工资总额参考：本年 1 月至当前申报月的账上工资累计
+  let yWage = 0;
+  for (let m = 1; m <= +IV.month.slice(5, 7); m++) yWage += ivWageBase(y + '-' + String(m).padStart(2, '0')).total;
+  const staff = +adj.staff || 0, disabled = +adj.disabled || 0;
+  const wageTotal = +adj.wage || +yWage.toFixed(2);
+  const avg = staff ? wageTotal / staff : 0;
+  const gap = Math.max(0, +(staff * 0.015 - disabled).toFixed(2));
+  const exempt = staff > 0 && staff <= 30;   // 30 人及以下免征（现行政策）
+  const due = exempt ? 0 : +(gap * avg).toFixed(2);
+  return head('残疾人就业保障金申报', `${H(entName())} · ${y} 年度。按年申报（广东在电子税务局办），公式与减免按现行政策预置。`, '纳税申报',
+    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
+     <button class="btn" data-act="dbfSave">保存</button>
+     <button class="btn" data-act="dbfVch">生成计提凭证</button>`)
+    + kpis([
+      { k: '应缴残保金', v: money(due), t: due ? 'w' : 'g' },
+      { k: '免征', v: exempt ? '是（≤30人）' : '否' },
+      { k: '账上工资累计（1月至今）', v: money(+yWage.toFixed(2)) },
+    ])
+    + cardp('计算（按上年口径申报时把三个数换成上年数）', `<div class="cols c4">
+      <div class="field"><label class="fl">在职职工人数</label><input type="number" id="dbfStaff" value="${adj.staff || ''}"></div>
+      <div class="field"><label class="fl">工资总额（默认取账上累计）</label><input type="number" step="0.01" id="dbfWage" value="${adj.wage || ''}" placeholder="${yWage.toFixed(2)}"></div>
+      <div class="field"><label class="fl">已安排残疾人就业人数</label><input type="number" step="0.01" id="dbfDisabled" value="${adj.disabled || ''}"></div>
+      <div class="field" style="display:flex;align-items:flex-end"><span class="mut">比例 1.5% · 年平均工资 ${money(+avg.toFixed(2))}</span></div>
+    </div>`)
+    + `<div class="note">公式：应缴 = （职工人数 × 1.5% − 已安排残疾人数）× 年平均工资；
+      30 人及以下免征（现行优惠，以申报年度政策为准）。工资总额默认取账上累计——这就是与利润表的勾稽，
+      改了要说得清差在哪。计提分录：借 5602 管理费用 / 贷 222111 应交税费_残保金。</div>`
+    + ivTieNote(w)
+    + ivPortalCards(['etax']);
+};
 
 /* ============ 申报表 → 生成凭证 ============ */
 /* 每张申报表可一键生成计提凭证，直接进凭证库：
@@ -469,6 +573,26 @@ document.addEventListener('click', e => {
   const a = e.target.closest('[data-act]');
   if (!a || !CUR_ENT) return;
   const act = a.dataset.act;
+  if (act === 'dbfSave' || act === 'dbfVch') {
+    const y = IV.month.slice(0, 4); const key = 'dbf' + y;
+    const adj = ivAdj(key);
+    adj.staff = numOf(($('dbfStaff') || {}).value); adj.wage = numOf(($('dbfWage') || {}).value);
+    adj.disabled = numOf(($('dbfDisabled') || {}).value);
+    ivAdjSave(key, adj);
+    if (act === 'dbfSave') { toast('已保存'); go('iv-dbf'); return; }
+    // 与页面同一套公式重算应缴
+    let yWage = 0;
+    for (let m = 1; m <= +IV.month.slice(5, 7); m++) yWage += ivWageBase(y + '-' + String(m).padStart(2, '0')).total;
+    const staff = +adj.staff || 0, wageTotal = +adj.wage || +yWage.toFixed(2);
+    // 缺口人数保留两位小数——和页面同一口径，页面显示多少凭证就是多少
+    const gap = Math.max(0, +(staff * 0.015 - (+adj.disabled || 0)).toFixed(2));
+    const due = (staff > 0 && staff <= 30) ? 0 : +(gap * (staff ? wageTotal / staff : 0)).toFixed(2);
+    const memo = y + ' 年残保金计提';
+    ivPushVoucher('__tax_dbf_' + y + '__', ivMonthEnd(IV.month), [
+      IVL('5602', '管理费用', due, 0, memo),
+      IVL('222111', '应交税费_残疾人就业保障金', 0, due, memo)]);
+    return;
+  }
   if (act === 'ivVchVat') { ivVchVat(); return; }
   if (act === 'ivVchCit') { ivVchCit(); return; }
   if (act === 'ivVchStamp') { ivVchStamp(); return; }

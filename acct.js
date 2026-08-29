@@ -206,6 +206,61 @@ S['ac-open'] = () => {
       [{ t: '编码' }, { t: '科目名称' }, { t: '期初借方', n: 1 }, { t: '期初贷方', n: 1 }], rows));
 };
 
+/* ============ 录凭证（手工做凭证） ============ */
+/* 科目下拉直接取科目设置那份（标准表+自建，停用的不出现）；
+   有项目的主体每行可挂项目，落成「科目_项目码」——和 T2 生成的凭证同一种写法，
+   科目余额表/明细账/报表按项目拆分自然生效。存进凭证库为「未过账」，核对后过账。 */
+const ACN = { lines: null };
+const acnBlank = () => ({ acct: '', proj: '', memo: '', dr: '', cr: '' });
+function acnHarvest() {
+  const rows = [...document.querySelectorAll('[data-vnrow]')];
+  if (rows.length) ACN.lines = rows.map(r => ({
+    acct: r.querySelector('[data-vnacct]').value,
+    proj: (r.querySelector('[data-vnproj]') || {}).value || '',
+    memo: r.querySelector('[data-vnmemo]').value,
+    dr: r.querySelector('[data-vndr]').value,
+    cr: r.querySelector('[data-vncr]').value,
+  }));
+}
+S['ac-new'] = () => {
+  if (!CUR_ENT) return needEnt('录凭证');
+  if (!ACN.lines) ACN.lines = [acnBlank(), acnBlank()];
+  const accs = ACCOUNTS();
+  const pjs = (RS && RS.projects) || [];
+  const leafSet = new Set(accs.map(a => String(a[0])));
+  const hasKid = c => accs.some(a => String(a[0]).length === String(c).length + 2 && String(a[0]).startsWith(String(c)));
+  const opt = sel => `<option value=""></option>` + accs.map(a =>
+    `<option value="${H(a[0])}" ${sel === String(a[0]) ? 'selected' : ''}>${H(a[0])} ${H(a[1])}${hasKid(a[0]) ? '（有下级）' : ''}</option>`).join('');
+  const pjOpt = sel => `<option value="">— 无 —</option>` + pjs.map(x =>
+    `<option value="${H(x.code)}" ${sel === x.code ? 'selected' : ''}>${H(x.name)}</option>`).join('');
+  const rows = ACN.lines.map((l, i) => `<tr data-vnrow="${i}">
+    <td><select data-vnacct style="min-width:210px">${opt(l.acct)}</select></td>
+    ${pjs.length ? `<td><select data-vnproj>${pjOpt(l.proj)}</select></td>` : ''}
+    <td><input data-vnmemo value="${H(l.memo)}" placeholder="摘要" style="min-width:150px"></td>
+    <td class="num"><input type="number" step="0.01" data-vndr value="${H(l.dr)}" placeholder="0.00" class="obin"></td>
+    <td class="num"><input type="number" step="0.01" data-vncr value="${H(l.cr)}" placeholder="0.00" class="obin"></td>
+    <td><button class="btn sm" data-vndel="${i}">删行</button></td></tr>`).join('');
+  const tdr = ACN.lines.reduce((s0, l) => s0 + (+l.dr || 0), 0);
+  const tcr = ACN.lines.reduce((s0, l) => s0 + (+l.cr || 0), 0);
+  const today = ym(new Date()) + '-' + String(new Date().getDate()).padStart(2, '0');
+  return head('录凭证', `${H(entName())} · 手工凭证。科目来自「基础 → 科目设置」（停用的不出现），有下级的科目建议选末级记账。`, '核算 · 凭证',
+    `<button class="btn" data-act="acnReset">清空</button>
+     <button class="btn pri" data-act="acnSave">保存凭证（未过账）</button>`)
+    + kpis([
+      { k: '借方合计', v: money(tdr) },
+      { k: '贷方合计', v: money(tcr) },
+      { k: '差额', v: money(tdr - tcr), t: Math.abs(tdr - tcr) < 0.005 ? 'g' : 'c' },
+    ])
+    + cardp('凭证头', `<div class="cols c4">
+        <div class="field"><label class="fl">日期</label><input type="date" id="vnDate" value="${AC.from <= today && today <= AC.to ? today : AC.to}" min="2026-01-01"></div>
+        <div class="field"><label class="fl">凭证字</label><input id="vnWord" value="记"></div>
+      </div>`)
+    + card('分录', `<div class="tw"><table><thead><tr><th>科目</th>${pjs.length ? '<th>项目</th>' : ''}<th>摘要</th><th class="num">借方</th><th class="num">贷方</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div style="padding:9px 12px"><button class="btn" data-act="acnAddRow">+ 加一行</button></div>`)
+    + `<div class="note">保存后进凭证库，状态<b>未过账</b>——核对后在凭证库过账，账簿与报表默认已包含未过账（可在科目余额表切换）。同一行借贷只填一边。</div>`;
+};
+
 /* ============ 科目余额表 ============ */
 S['ac-bal'] = () => {
   if (!CUR_ENT) return needEnt('科目余额表');
@@ -218,7 +273,7 @@ S['ac-bal'] = () => {
   const ebD = list.reduce((s, o) => s + Math.max(0, o.eb), 0), ebC = list.reduce((s, o) => s + Math.max(0, -o.eb), 0);
   const bal = Math.abs(T.dr - T.cr) < 0.005;
   const rows = list.map(o => [
-    `<span class="code">${H(o.acct)}</span>`, H(o.name || acctName(o.acct)),
+    `<span class="code">${H(o.acct)}</span>`, H(acctName(o.acct) || o.name),
     o.ob > 0 ? money(o.ob) : '', o.ob < 0 ? money(-o.ob) : '',
     o.dr ? money(o.dr) : '', o.cr ? money(o.cr) : '',
     o.ydr ? money(o.ydr) : '', o.ycr ? money(o.ycr) : '',
@@ -253,7 +308,7 @@ S['ac-detail'] = () => {
   const accts = Object.values(m).sort((a, b) => a.acct.localeCompare(b.acct));
   if (!AC.acct && accts.length) AC.acct = accts[0].acct;
   const d = AC.acct ? acctDetail(CUR_ENT, AC.acct, AC.from, AC.to, AC.inc) : null;
-  const nm = AC.acct ? (m[AC.acct] ? m[AC.acct].name : '') || acctName(AC.acct) : '';
+  const nm = AC.acct ? acctName(AC.acct) || (m[AC.acct] ? m[AC.acct].name : '') : '';
   const rows = d ? [
     { cls: 'sum', d: [AC.from, '', '<b>期初余额</b>', '', '', dirOf(d.open), `<b>${absM(d.open)}</b>`] },
   ].concat(d.rows.map(r => [
@@ -281,7 +336,7 @@ S['ac-gl'] = () => {
   const accts = Object.values(m).sort((a, b) => a.acct.localeCompare(b.acct));
   if (!AC.acct && accts.length) AC.acct = accts[0].acct;
   const g = AC.acct ? acctByMonth(CUR_ENT, AC.acct, year, AC.inc) : null;
-  const nm = AC.acct ? (m[AC.acct] ? m[AC.acct].name : '') || acctName(AC.acct) : '';
+  const nm = AC.acct ? acctName(AC.acct) || (m[AC.acct] ? m[AC.acct].name : '') : '';
   const rows = g ? [{ cls: 'sum', d: ['', '<b>年初余额</b>', '', '', dirOf(g.ob), `<b>${absM(g.ob)}</b>`] }]
     .concat(g.rows.map(r => [r.mm + '月', '本月合计', r.dr ? money(r.dr) : '', r.cr ? money(r.cr) : '', dirOf(r.bal), absM(r.bal)]))
     .concat([{ cls: 'sum', d: ['', '<b>本年累计</b>', `<b>${money(g.tdr)}</b>`, `<b>${money(g.tcr)}</b>`, dirOf(g.close), `<b>${absM(g.close)}</b>`] }]) : [];
@@ -303,7 +358,7 @@ function acExport(kind) {
     const m = acctBalance(CUR_ENT, AC.from, AC.to, AC.inc);
     const hdr = ['主体', '期间', '科目编码', '科目名称', '期初借方', '期初贷方', '本期借方', '本期贷方', '本年借方', '本年贷方', '期末借方', '期末贷方'];
     const rows = Object.values(m).sort((a, b) => a.acct.localeCompare(b.acct)).map(o => [
-      en, AC.from + '~' + AC.to, o.acct, o.name || acctName(o.acct),
+      en, AC.from + '~' + AC.to, o.acct, acctName(o.acct) || o.name,
       o.ob > 0 ? o.ob.toFixed(2) : '', o.ob < 0 ? (-o.ob).toFixed(2) : '',
       o.dr.toFixed(2), o.cr.toFixed(2), o.ydr.toFixed(2), o.ycr.toFixed(2),
       o.eb > 0 ? o.eb.toFixed(2) : '', o.eb < 0 ? (-o.eb).toFixed(2) : '']);
@@ -336,6 +391,38 @@ document.addEventListener('click', e => {
     const t = list.find(x => x.id === v.dataset.acv);
     if (t) { t.posted = t.posted ? 0 : 1; vchSave(CUR_ENT, list); toast(t.posted ? '已过账' : '已反过账'); go('ac-vch'); }
     return;
+  }
+  const vdel = e.target.closest('[data-vndel]');
+  if (vdel) { acnHarvest(); ACN.lines.splice(+vdel.dataset.vndel, 1); if (!ACN.lines.length) ACN.lines = [acnBlank()]; go('ac-new'); return; }
+  const acn = e.target.closest('[data-act="acnAddRow"],[data-act="acnSave"],[data-act="acnReset"]');
+  if (acn && CUR_ENT) {
+    const act0 = acn.dataset.act;
+    if (act0 === 'acnAddRow') { acnHarvest(); ACN.lines.push(acnBlank()); go('ac-new'); return; }
+    if (act0 === 'acnReset') { ACN.lines = null; go('ac-new'); return; }
+    acnHarvest();
+    const date = ($('vnDate') || {}).value;
+    if (!date || date < '2026-01-01') { toast('日期不能早于 2026-01-01'); return; }
+    const lines = [];
+    for (const l of ACN.lines) {
+      const dr = +(+l.dr || 0).toFixed(2), cr = +(+l.cr || 0).toFixed(2);
+      if (!dr && !cr) continue;
+      if (!l.acct) { toast('有金额的行必须选科目'); return; }
+      if (dr && cr) { toast('同一行借贷只填一边'); return; }
+      const acct = l.acct + (l.proj ? '_' + l.proj : '');
+      lines.push({ acct, name: acctName(l.acct) || l.acct, dr, cr, memo: l.memo || '手工凭证' });
+    }
+    if (lines.length < 2) { toast('至少两行有金额的分录'); return; }
+    const d0 = lines.reduce((s0, l) => s0 + l.dr - l.cr, 0);
+    if (Math.abs(d0) > 0.005) { toast('借贷不平，差 ' + money(d0) + '，不能保存'); return; }
+    const list = vchLoad(CUR_ENT);
+    const no = String(list.filter(v => v.period === date.slice(0, 7)).length + 1);
+    list.push({ id: uid(), period: date.slice(0, 7), date, word: ($('vnWord') || {}).value || '记',
+      no, posted: 0, src: '手工录入', lines });
+    vchSave(CUR_ENT, list);
+    ACN.lines = null;
+    if (date < AC.from || date > AC.to) setRange('from', date.slice(0, 7) + '-01');
+    toast(`凭证已保存（${lines.length} 行，未过账），去凭证库核对过账`, 4600);
+    go('ac-vch'); return;
   }
   const ob = e.target.closest('[data-act="obSave"]');
   if (ob && CUR_ENT) {

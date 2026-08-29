@@ -62,7 +62,7 @@ const DOMS = [
   { id: 'ar', n: '应收', ic: '◫', items: [['p-ar-contract', '合同台账'], ['p-ar-bill', '应收账单'], ['p-ar-claim', '收款认领'], ['p-ar-aging', '账龄与催收']] },
   { id: 'cost', n: '费控', ic: '▧', items: [['p-exp', '报销与费控'], ['p-flow', '审批路由']] },
   { id: 'close', n: '核算', ic: '▩', ready: 1, items: [
-      ['ac-vch', '凭证库'],
+      ['ac-vch', '凭证库'], ['ac-new', '录凭证'],
       ['--账簿'],
       ['ac-open', '期初余额'],
       ['ac-bal', '科目余额表'], ['ac-detail', '明细账'], ['ac-gl', '总分类账'],
@@ -338,7 +338,14 @@ const acctName = code => {
   if (hit) return hit[1];
   const tpl = list.find(a => a[0].includes('{p}') &&
     new RegExp('^' + a[0].replace('{p}', '\\d+') + '$').test(code));
-  return tpl ? tpl[1] : '';
+  if (tpl) return tpl[1];
+  // 带项目后缀的（560201_2001）解析基础码——科目设置里改了名，账簿才跟得上
+  const base = String(code).split('_')[0];
+  if (base !== String(code)) {
+    const bh = list.find(a => a[0] === base);
+    if (bh) return bh[1];
+  }
+  return '';
 };
 /** 对方户名是否业主；是则返回项目代码 */
 function ownerProj(opp) {

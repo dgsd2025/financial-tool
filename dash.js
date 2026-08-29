@@ -247,8 +247,9 @@ S['p-dash'] = () => {
   }
   return `<div class="bi">
     <div class="bi-head">
-      <div><div class="bi-title">${single ? H(one.name) + ' · 经营看板' : '集团经营看板'}</div>
-        <div class="bi-sub">${d.demo ? d.year + ' 年' : AC.from + ' 〜 ' + AC.to + '（趋势为 ' + d.year + ' 全年）'} · ${d.ents.length} 个经营主体 · 顶栏可换主体与期间</div></div>
+      <div><div class="bi-title">${single ? H(one.name) + ' · 经营看板' : '集团经营看板'}
+          <span class="bi-period">📅 ${d.demo ? d.year + '-01-01 〜 ' + d.year + '-12-31' : AC.from + ' 〜 ' + AC.to}</span></div>
+        <div class="bi-sub">${d.ents.length} 个经营主体 · KPI/构成/现金流按上方期间统计，趋势图为 ${d.year} 全年走势 · 顶栏可换主体与期间</div></div>
       <div style="display:flex;gap:8px;align-items:center">${scopeBar}
       ${d.demo ? '<span class="bi-demo">演示数据 · 仅展示样式 <button class="btn sm" data-act="dashReal">切回真实数据</button></span>'
       : '<button class="btn sm" data-act="dashDemo">看演示版式</button>'}</div>

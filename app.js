@@ -68,17 +68,16 @@ const DOMS = [
       ['ac-bal', '科目余额表'], ['ac-detail', '明细账'], ['ac-gl', '总分类账'],
       ['--固定资产'],
       ['p-fa', '资产卡片'], ['p-fadep', '折旧计提'],
-      ['--报表中心'],
-      ['rp-home', '报表首页'], ['rp-bs', '资产负债表'], ['rp-pl', '利润表'],
-      ['rp-cf', '现金流量表'], ['rp-exp', '费用明细表'],
-      ['--合并报表'],
-      ['cs-set', '合并设置'], ['cs-reg', '内部交易登记'], ['cs-elim', '抵消分录'],
-      ['cs-bs', '合并资产负债表'], ['cs-pl', '合并利润表'], ['cs-cf', '合并现金流量表'],
       ['--其他'],
       ['p-stock', '进销存台账'], ['p-count', '月末盘点'], ['p-close', '月结检查单'],
       ['p-tax-cal', '申报日历'] ] },
   { id: 'analysis', n: '分析', ic: '◧', ready: 1, items: [['p-dash', '经营看板'], ['p-daily', '日损益'], ['p-project', '项目盈利']] },
-  { id: 'control', n: '管控', ic: '⚑', items: [['p-related', '关联方'], ['p-alert', '预警中心'], ['p-log', 'Agent日志']] },
+  { id: 'report', n: '报表', ic: '▤', ready: 1, items: [
+      ['rp-home', '报表首页'], ['rp-bs', '资产负债表'], ['rp-pl', '利润表'],
+      ['rp-cf', '现金流量表'], ['rp-exp', '费用明细表'],
+      ['--合并报表'],
+      ['cs-set', '合并设置'], ['cs-reg', '内部交易登记'], ['cs-elim', '抵消分录'],
+      ['cs-bs', '合并资产负债表'], ['cs-pl', '合并利润表'], ['cs-cf', '合并现金流量表'] ] },
   { id: 'base', n: '基础', ic: '⚙', ready: 1, items: [
       ['bs-acct', '科目设置'],
       ['--辅助核算'],
@@ -1333,9 +1332,6 @@ const PHASE2 = {
   'p-tax-cal': ['申报日历', 'M6', '征期前 3 工作日红线预警'],
   'p-daily': ['日损益', 'M7', '平台数据自动抓取算毛利'],
   'p-project': ['项目盈利', 'M7', '项目/合同级盈利与成本分摊'],
-  'p-related': ['关联方', 'M8', '自动打标、独立报告线'],
-  'p-alert': ['预警中心', 'M8', '全系统预警汇总与超期升级'],
-  'p-log': ['Agent日志', 'M9', '执行留痕与流程心跳'],
   'p-entity': ['主体档案', 'M0', '多主体统一登记'],
   'p-match': ['跨系统对码', 'M0', '销售端与采购端主数据映射'],
   'p-perm': ['用户与权限', '权限', '功能权限 + 数据权限 + 操作权限三维'],
@@ -1372,7 +1368,7 @@ function acRangeHtml(pfx) {
 function renderPerBar() {
   const bar = $('perBar'), box = $('perRange');
   if (!bar || !box) return;
-  const on = CURD === 'close' && typeof AC !== 'undefined';
+  const on = (CURD === 'close' || CURD === 'report') && typeof AC !== 'undefined';
   bar.style.display = on ? '' : 'none';
   if (on) box.innerHTML = acRangeHtml('per');
 }
@@ -1435,7 +1431,8 @@ function renderNav() {
 }
 function go(id) {
   if (/^t[1234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
-  else if (id.startsWith('ac-') || id.startsWith('rp-') || id.startsWith('cs-')) CURD = 'close';
+  else if (id.startsWith('ac-')) CURD = 'close';
+  else if (id.startsWith('rp-') || id.startsWith('cs-')) CURD = 'report';
   else if (id.startsWith('iv-')) CURD = 'inv';
   else if (id.startsWith('bs-')) CURD = 'base';
   else if (id.startsWith('fd-')) CURD = 'fund';

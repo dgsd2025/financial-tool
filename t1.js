@@ -1,7 +1,7 @@
 /* T1 资金日报生成器
    账户台账预置 → 每日只填变动的 → 三级汇总 + 变动率预警/覆盖红线 → 一键生成钉钉文本
    分布表按主体出「较上日变动率」，超阈值（默认 ±10%）标预警；
-   余额可下钻：主体 → 账户 → T2 导入留存的流水明细。
+   余额可下钻：主体 → 账户 → 导入留存的流水明细（T2 转换或 T1 对账单导入都会留存）。
    诚实定位：登网银抄余额这步省不掉，工具省的是抄完之后的汇总/算/排版/发。
    依赖 app.js 的工具函数。 */
 'use strict';
@@ -280,7 +280,8 @@ function t1ClearBalance(accId, date, from, expectVal) {
   return true;
 }
 
-/* 流水明细留存：T2 每转换一批，就把解析出的流水按「账户 + 交易日」存一份，
+/* 流水明细留存：T2 每转换一批、T1 导入每导一份带交易列的对账单，
+   都把解析出的流水按「账户 + 交易日」存一份，
    T1 里点余额下钻时能看到每一笔是什么。余额是结论，流水是物证。
    同账户同一天重复导入 = 整天替换，不累加，所以重传同一份文件不会翻倍。 */
 const T1_TXN_KEY = 'fsc_t1_txns_v1';
@@ -303,7 +304,7 @@ function t1SaveTxns(t) {
     catch (e2) { toast('流水明细存不下了，本批未保存（余额不受影响）', 4200); return false; }
   }
 }
-/** T2 转换完调这个存明细。recs: [{date,memo,dir,amt,opp,ref,bal}]，bal 是该笔发生后的账面余额（可为 null） */
+/** T2 转换完、或 T1 导入落盘时调这个存明细。recs: [{date,memo,dir,amt,opp,ref,bal}]，bal 是该笔发生后的账面余额（可为 null） */
 function t1PutTxns(accId, fileName, recs) {
   if (!t1AccById(accId) || !recs || !recs.length) return 0;
   const all = t1LoadTxns();
@@ -317,16 +318,17 @@ function t1PutTxns(accId, fileName, recs) {
       bal: (r.bal === null || r.bal === undefined || isNaN(r.bal)) ? null : Number(r.bal),
     });
   });
-  let n = 0;
   const at = new Date().toLocaleString('zh-CN');
   Object.keys(byDate).forEach(d => {
     // total 记原始笔数：超 800 截断时页面要如实标出来，不能让截过的「当日合计」冒充全量
     mine[d] = { file: String(fileName || ''), at, total: byDate[d].length, rows: byDate[d].slice(0, 800) };
-    n += mine[d].rows.length;
   });
   // 每个账户最多留 62 天（约两个月），从最老的掐——localStorage 就那么大
   const ds = Object.keys(mine).sort();
   while (ds.length > 62) { delete mine[ds.shift()]; }
+  // 笔数在掐完旧桶之后再数：导超 62 天的对账单时，被掐掉的部分不能算「已留存」
+  let n = 0;
+  Object.keys(byDate).forEach(d => { if (mine[d]) n += mine[d].rows.length; });
   return t1SaveTxns(all) ? n : 0;
 }
 /** T2 换绑账户时，把写错账户的那几天撤掉（和 t1ClearBalance 同一个纪律）。
@@ -356,11 +358,24 @@ const T1_IMP_ALIAS = {
   type:  ['类型', '性质', '类别'],
   fixed: ['月固定支出', '固定支出', '月支出', '月均支出'],
   bal:   ['余额', '当前余额', '账户余额'],
-  date:  ['日期', '余额日期', '数据日期'],
+  date:  ['日期', '余额日期', '数据日期', '入账日期', '交易日期', '记账日期', '交易日', '交易时间', '业务日期'],
+  // 以下是对账单的交易列，别名与 T2 的 FIELDS 保持同一份口径——认出来就把每一笔留存给下钻页
+  memo:   ['摘要', '摘要说明', '用途', '附言', '交易摘要', '备注', '交易类型'],
+  opp:    ['对方户名', '对方账户名称', '对方名称', '收款人名称', '付款人名称', '对方单位'],
+  // 对方账号必须自己占一个字段：不占坑的话「账号」的包含匹配会把「对方账号」列错认成本方账号
+  oppAcct: ['对方账号', '对方账户', '对方卡号'],
+  inAmt:  ['转入金额', '收入', '贷方发生额', '贷方金额', '收入金额', '存入', '收款金额'],
+  outAmt: ['转出金额', '支出', '借方发生额', '借方金额', '支出金额', '支取', '付款金额'],
+  amt:    ['金额', '发生额', '交易金额'],
+  dc:     ['借贷', '借贷标志', '收付标志', '资金流向'],
+  ref:    ['流水号', '交易流水号', '凭证号', '业务编号', '交易序号'],
 };
 const T1_IMP_FIELDS = [
   ['ent', '主体', 1], ['name', '账户 / 平台', 1], ['no', '账号', 0],
-  ['type', '类型', 0], ['fixed', '月固定支出', 0], ['bal', '余额', 0], ['date', '余额日期', 0],
+  ['type', '类型', 0], ['fixed', '月固定支出', 0], ['bal', '余额', 0], ['date', '日期', 0],
+  ['memo', '摘要', 0], ['opp', '对方户名', 0], ['oppAcct', '对方账号', 0],
+  ['inAmt', '收入金额', 0], ['outAmt', '支出金额', 0],
+  ['amt', '发生额（单列）', 0], ['dc', '借贷标志', 0], ['ref', '流水号', 0],
 ];
 
 /* 新账户编号取现有最大序号 +1。不能用 length —— 删过账户会撞号 */
@@ -449,7 +464,7 @@ function t1FindAcc(ent, name, no) {
    传哪份文件算哪份；不传就算当前正在设置的那份。 */
 function t1ImpPlan(f) {
   const im = f || t1ImpCur();
-  const out = { add: [], upd: [], same: [], bad: [], dup: 0, fixed: {}, bals: [], keys: new Set() };
+  const out = { add: [], upd: [], same: [], bad: [], dup: 0, fixed: {}, bals: [], keys: new Set(), txns: [], txnSkip: 0 };
   if (!im || !im.fixEnt || !(im.fixName || '').trim()) return out;
   const seen = new Set();
   im.rows.slice(im.headRow + 1).forEach((r, i) => {
@@ -467,9 +482,38 @@ function t1ImpPlan(f) {
       const v0 = Number(cell('bal').replace(/[,，¥￥]/g, ''));
       if (cell('bal') !== '' && !isNaN(v0)) {
         const d0 = im.map.date !== undefined && cell('date') ? normDate(cell('date')) : T1.date;
-        out._balMap = out._balMap || {};
-        out._balMap[key + '|' + d0] = { key, ent, name, no, date: d0, val: v0 };
+        // normDate 认不出的串会原样返回（如「合计」）——垃圾键写进每日余额会搅乱日期序，
+        // 认不出就不收这行的余额（合计行的余额本来也不是某一天的日终数）
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d0)) {
+          out._balMap = out._balMap || {};
+          out._balMap[key + '|' + d0] = { key, ent, name, no, date: d0, val: v0 };
+        }
       }
+    }
+    // 流水明细也逐行收，且在账户去重之前——账户一个文件只建一次，交易却是每行一笔。
+    // 认出「日期 + 任一金额列」就是带明细的对账单，每一笔留存给 T1 下钻页（余额是结论，流水是物证）。
+    // 注意：列别名和方向判据抄的是 T2 那份，但 T2 的高级认列（同名双列推断等）这里没有——
+    // 认不出时预览会诚实显示 0 笔并提示，复杂格式走 T2 转换兜底
+    if (!blank && im.map.date !== undefined
+      && (im.map.inAmt !== undefined || im.map.outAmt !== undefined || im.map.amt !== undefined)) {
+      // normDate 认不出的串会原样返回（如「合计」），必须再验一道是不是真日期，
+      // 否则合计行会被当成一笔交易收进来
+      const d1raw = cell('date') ? normDate(cell('date')) : '';
+      const d1 = /^\d{4}-\d{2}-\d{2}$/.test(d1raw) ? d1raw : '';
+      let inA = numOf(cell('inAmt')), outA = numOf(cell('outAmt'));
+      if (im.map.inAmt === undefined && im.map.outAmt === undefined) {
+        const a1 = numOf(cell('amt'));
+        const isOut = /借|支|付|出|-/.test(cell('dc')) || a1 < 0;   // 和 T2 runRules 同一判据
+        if (isOut) outA = Math.abs(a1); else inA = Math.abs(a1);
+      }
+      const amt1 = inA > 0 ? inA : outA;
+      if (d1 && amt1 > 0) {
+        // 余额不能用 numOf（它把空串归 0）：余额恰好 0 是合法值，空/横杠才算没有
+        const bs = cell('bal').replace(/[,，\s¥￥]/g, '');
+        out.txns.push({ key, date: d1, memo: cell('memo'), opp: cell('opp'),
+          dir: inA > 0 ? 'in' : 'out', amt: amt1, ref: cell('ref'),
+          bal: (bs === '' || bs === '-' || bs === '—' || isNaN(Number(bs))) ? null : Number(bs) });
+      } else out.txnSkip++;   // 合计行、说明行：没日期或金额为 0，进不了留存
     }
     if (seen.has(key)) { out.dup++; return; }
     seen.add(key); out.keys.add(key);
@@ -499,13 +543,14 @@ function t1ImpPlan(f) {
 /* 整批合计：给页面上的 KPI 与「全部导入」按钮用 */
 function t1ImpTotals() {
   const files = (T1.imp && T1.imp.files) || [];
-  const t = { add: 0, upd: 0, same: 0, bals: 0, bad: 0, ready: 0, notReady: 0 };
+  const t = { add: 0, upd: 0, same: 0, bals: 0, bad: 0, ready: 0, notReady: 0, txns: 0, txnSkip: 0 };
   files.forEach(f => {
     if (!t1ImpReady(f)) { t.notReady++; return; }
     t.ready++;
     const p = t1ImpPlan(f);
     t.add += p.add.length; t.upd += p.upd.length; t.same += p.same.length;
     t.bals += p.bals.length; t.bad += p.bad.length;
+    t.txns += p.txns.length; t.txnSkip += p.txnSkip;
   });
   return t;
 }
@@ -516,7 +561,7 @@ function t1ImpApply() {
   const im = T1.imp;
   const files = (im.files || []).filter(t1ImpReady);
   let seq = t1NextSeq();
-  let nAdd = 0, nUpd = 0, nb = 0, off = 0, nf = 0;
+  let nAdd = 0, nUpd = 0, nb = 0, nt = 0, off = 0, nf = 0;
   const allKeys = new Set();
 
   files.forEach(f => {
@@ -549,6 +594,10 @@ function t1ImpApply() {
       const id = idOf[b.key]; if (!id) return;
       if (t1PutBalance(id, b.date, b.val, 'T1导入', 1).ok) nb++;
     });
+    // 流水明细：和 T2 转换共用同一份留存（t1PutTxns 同日整天替换），重导同一份文件不会翻倍
+    const txnByAcc = {};
+    plan.txns.forEach(x => { const id = idOf[x.key]; if (id) (txnByAcc[id] = txnByAcc[id] || []).push(x); });
+    Object.keys(txnByAcc).forEach(id => { nt += t1PutTxns(id, f.fileName, txnByAcc[id]); });
     nf++;
   });
 
@@ -562,7 +611,7 @@ function t1ImpApply() {
 
   T1.imp = null;
   toast(`${nf} 份文件导入完成：新增 ${nAdd} 户、更新 ${nUpd} 户`
-    + (nb ? `、余额 ${nb} 条` : '') + (off ? `、停用 ${off} 户` : ''), 4600);
+    + (nb ? `、余额 ${nb} 条` : '') + (nt ? `、流水明细 ${nt} 笔` : '') + (off ? `、停用 ${off} 户` : ''), 4600);
   go('t1-acc');
 }
 
@@ -734,8 +783,8 @@ S['t1-ent'] = () => {
       : '');
   }).join('');
   const detailIntro = txnAccs.length
-    ? `<div class="note g"><b>流水明细 · 每一笔都列在下面：</b>共 ${totDays} 天 ${totRows} 笔，来自 T2 转换银行流水时的自动留存，按交易日分块、新的在前。同一天重复导入整天替换，不会重复累计；每户最多留最近 62 天。</div>` + detail
-    : `<div class="note"><b>该主体还没有留存的流水明细。</b>上面的余额来自手工录入或台账导入——用 <b>T2 银行流水转凭证</b>处理一次网银流水，每一笔会自动留存并直接列在这里。</div>`;
+    ? `<div class="note g"><b>流水明细 · 每一笔都列在下面：</b>共 ${totDays} 天 ${totRows} 笔，来自 T2 转换 / T1 对账单导入时的自动留存，按交易日分块、新的在前。同一天重复导入整天替换，不会重复累计；每户最多留最近 62 天。</div>` + detail
+    : `<div class="note"><b>该主体还没有留存的流水明细。</b>上面的余额来自手工录入或只带余额的导入——用 <b>T2 银行流水转凭证</b>转一次网银流水，或在 <b>T1 导入</b>里重导一次带交易列（收入/支出）的对账单，每一笔都会自动留存并直接列在这里。</div>`;
 
   return head(`${ent} · 资金明细`, `${T1.date} 各账户余额与来源。<b>导入过的流水每一笔都直接列在下方</b>；没有流水的账户，余额是手工录或台账导的。`, '工具箱 · T1',
     `<input type="date" id="t1date" value="${T1.date}">
@@ -746,7 +795,7 @@ S['t1-ent'] = () => {
       { k: '较上一日', v: e.delta === null ? '—' : (e.delta >= 0 ? '+' : '') + money(e.delta), u: e.delta === null ? '' : '元', t: e.delta === null ? '' : (e.delta >= 0 ? 'g' : 'c') },
       { k: '较上日变动率', v: e.rate === null ? '—' : (e.rate >= 0 ? '+' : '') + e.rate.toFixed(2) + '%', t: e.rate === null ? '' : (e.rateWarn ? 'c' : 'g') },
       { k: '账户', v: `${e.n}<small> / ${e.n + e.miss}</small>`, d: e.miss ? `${e.miss} 户从未录入` : '全部有数' },
-      { k: '留存流水', v: String(totRows), u: '笔', d: totRows ? `${totDays} 天 · 全部列在下方` : '导过 T2 流水才有', t: totRows ? 'g' : '' },
+      { k: '留存流水', v: String(totRows), u: '笔', d: totRows ? `${totDays} 天 · 全部列在下方` : '导过带明细的流水才有', t: totRows ? 'g' : '' },
     ])
     + exp
     + (e.miss ? `<div class="note w"><b>${e.miss} 个账户从未录入余额</b>，上面的合计与变动率只含已录入的 ${e.n} 户。</div>` : '')
@@ -770,11 +819,11 @@ S['t1-txn'] = () => {
   if (!tb.totalDays) {
     return head(`${a.ent} · ${a.name} · 流水明细`, '这个账户还没有留存的流水。', '工具箱 · T1', back)
       + `<div class="soonbox"><div class="si">▷</div><h3>暂无流水明细</h3>
-         <p>它的余额来自手工录入或台账导入。用 <b>T2 银行流水转凭证</b>处理一次这个账户的网银流水后，每一笔都会留存在这里。</p></div>`;
+         <p>它的余额来自手工录入或只带余额的导入。用 <b>T2 银行流水转凭证</b>转一次这个账户的网银流水，或在 <b>T1 导入</b>里重导一次带交易列（收入/支出）的对账单，每一笔都会留存在这里。</p></div>`;
   }
 
   return head(`${a.ent} · ${a.name} · 流水明细`,
-    `T2 转换流水时自动留存，共 <b>${tb.totalDays}</b> 天 <b>${tb.totalRows}</b> 笔，全部列在下面。同一天重复导入会整天替换，不会重复累计；最多留最近 62 天。`,
+    `T2 转换 / T1 对账单导入时自动留存，共 <b>${tb.totalDays}</b> 天 <b>${tb.totalRows}</b> 笔，全部列在下面。同一天重复导入会整天替换，不会重复累计；最多留最近 62 天。`,
     '工具箱 · T1', back)
     + tb.html;
 };
@@ -855,7 +904,7 @@ S['t1-imp'] = () => {
   const picker = `<input type="file" id="t1file" accept=".xlsx,.csv,.txt" multiple>`;
 
   if (!im || !im.files.length) {
-    return head('导入账户台账', '一张表把账户建好。<b>带余额列就顺手把余额也导了</b>——不带就只导台账。', '工具箱 · T1', tools)
+    return head('导入账户台账', '一张表把账户建好。<b>带余额列就顺手导余额；带交易列（收入/支出）就把每一笔流水也留存</b>，在 T1 下钻页逐笔可见。', '工具箱 · T1', tools)
       + cardp('选择文件', picker
         + `<div class="note" style="margin-top:11px"><b>可以一次选多份</b>（按住 ⌘ 或 Shift 多选，也能分几次挑、后选的往上加）。
           一份文件 = 一个账户：每份单独选主体、填账户名，文件名里带账号后四位或账户名的会自动认出来。</div>
@@ -876,7 +925,8 @@ S['t1-imp'] = () => {
     const st = !p
       ? `<span class="red">${!f.fixEnt ? '要选主体' : '要填账户名'}</span>`
       : `${p.add.length ? pill('新建户', 'ok') : (p.upd.length ? pill('更新户', 'wa') : pill('已有户', 'mu'))}
-         ${p.bals.length ? `余额 <b>${p.bals.length}</b> 天` : '<span class="mut">无余额列</span>'}`;
+         ${p.bals.length ? `余额 <b>${p.bals.length}</b> 天` : '<span class="mut">无余额列</span>'}${
+         p.txns.length ? ` · 流水 <b>${p.txns.length}</b> 笔` : ''}`;
     return [
       `${on ? '<b>▶ </b>' : ''}${H(f.fileName.slice(0, 26))}${f.guessed ? ' <span class="mut">·自动认出</span>' : ''}`,
       String(f.rows.length),
@@ -919,6 +969,7 @@ S['t1-imp'] = () => {
       { k: '更新账户', v: String(tot.upd), u: '户', t: tot.upd ? 'w' : '' },
       { k: '无变化', v: String(tot.same), u: '户' },
       { k: '带余额', v: String(tot.bals), u: '条', t: tot.bals ? 'g' : '' },
+      { k: '流水明细', v: String(tot.txns), u: '笔', t: tot.txns ? 'g' : '', d: tot.txns ? '逐笔留存可下钻' : '认出交易列才有' },
       { k: '待设置', v: String(tot.notReady), u: '份', t: tot.notReady ? 'c' : 'g' },
     ])
     + cardp(`文件清单（${im.files.length} 份）`, table(
@@ -935,6 +986,12 @@ S['t1-imp'] = () => {
     + (tot.bad ? `<div class="note c"><b>整批共 ${tot.bad} 行没法用，会跳过。</b></div>` : '')
     + (tot.bals ? `<div class="note"><b>余额会写到 ${dates.slice(0, 8).join('、')}${dates.length > 8 ? ` 等 ${dates.length} 天` : ''}</b>，
         在 T1 里标「来自 T1导入」。文件里没有余额日期列时用当前选的日期 ${T1.date}。</div>` : '')
+    + (tot.txns ? `<div class="note g"><b>流水明细 ${tot.txns} 笔会一并留存</b>${tot.txnSkip ? `（另有 ${tot.txnSkip} 行没日期或金额为 0，多为合计/说明行，留不了）` : ''}——导入后在 T1 点主体余额下钻，每一笔直接列出。同一天重复导入整天替换，不会翻倍；每户最多留最近 62 天，更早的会被掐掉并按实际留存数报。</div>` : '')
+    + (!tot.txns && tot.txnSkip ? `<div class="note w"><b>认出了交易列，但 ${tot.txnSkip} 行都没收上</b>（没日期、金额为 0，或日期认不出来）。检查「日期」对应的列是不是交易日期——对成时间/序号列就会整份收不上。</div>` : '')
+    + (t1ImpReady(cur) && p.txns.length === 0 && cur.map.bal !== undefined && cur.map.date !== undefined
+        && cur.map.inAmt === undefined && cur.map.outAmt === undefined && cur.map.amt === undefined
+      ? `<div class="note w"><b>当前这份没认出收入/支出列，只收余额、不留流水明细。</b>要每一笔都能在 T1 里看到，
+         把上面「收入金额 / 支出金额」（或「发生额（单列）+ 借贷标志」）对应上再导。</div>` : '')
     + cardp('导入方式', `<label style="font-size:12px"><input type="checkbox" id="t1off" ${im.offStale ? 'checked' : ''}>
         把「这批文件里都没有、但当前在管」的账户设为<b>停用</b></label>
       <div class="note" style="margin-top:9px"><b>不勾就是纯追加合并</b>：这批没提到的账户原样不动。

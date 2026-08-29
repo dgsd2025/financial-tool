@@ -215,6 +215,7 @@ function dimScreen(kind) {
   const cnt = {};
   pool.forEach(x => { if (x.who) cnt[x.who] = (cnt[x.who] || 0) + 1; });
   const rows = list.map(x => [
+    x.code ? `<span class="code">${H(x.code)}</span>` : '<span class="mut">—</span>',
     H(x.name), H(x.taxno || '—'), H(x.contact || '—'), H(x.phone || '—'), H(x.memo || '—'),
     cnt[x.name] ? pill(`票据 ${cnt[x.name]} 张`, 'ok') : '<span class="mut">—</span>',
     x.off ? pill('停用', 'wa') : pill('启用', 'ok'),
@@ -232,6 +233,7 @@ function dimScreen(kind) {
     ])
     + cardp(editing ? `编辑：${H(editing.name)}` : '新增' + (isCust ? '客户' : '供应商'), `
       <div class="cols c4">
+        <div class="field"><label class="fl">编码</label><input id="dmCode" value="${editing ? H(editing.code || '') : ''}" placeholder="如 00001"></div>
         <div class="field"><label class="fl">名称 <span class="red">*</span></label><input id="dmName" value="${editing ? H(editing.name) : ''}"></div>
         <div class="field"><label class="fl">纳税人识别号</label><input id="dmTax" value="${editing ? H(editing.taxno || '') : ''}"></div>
         <div class="field"><label class="fl">联系人</label><input id="dmContact" value="${editing ? H(editing.contact || '') : ''}"></div>
@@ -242,7 +244,7 @@ function dimScreen(kind) {
         ${editing ? '<button class="btn" data-act="dimCancel">取消</button> ' : ''}
         <button class="btn pri" data-act="dimSave">${editing ? '保存修改' : '新增'}</button></div>`)
     + card('名册', rows.length ? table(
-      [{ t: '名称' }, { t: '纳税人识别号' }, { t: '联系人' }, { t: '电话' }, { t: '备注' }, { t: '票据' }, { t: '状态' }, { t: '' }], rows)
+      [{ t: '编码' }, { t: '名称' }, { t: '纳税人识别号' }, { t: '联系人' }, { t: '电话' }, { t: '备注' }, { t: '票据' }, { t: '状态' }, { t: '' }], rows)
       : `<div style="padding:26px;text-align:center;color:var(--text-3)">还没有${isCust ? '客户' : '供应商'}——手工新增，或从票池一键收录</div>`);
 }
 S['bs-cust'] = () => dimScreen('cust');
@@ -287,7 +289,8 @@ S['bs-proj'] = () => {
 
 /* ============ 客商/项目事件 ============ */
 document.addEventListener('click', e => {
-  const kindOf = () => (CURS === 'bs-cust' ? 'cust' : 'supp');
+  const kindOf = () => (CURS === 'bs-cust' ? 'cust' : CURS === 'bs-supp' ? 'supp'
+    : CURS === 'bs-dept' ? 'dept' : CURS === 'bs-staff' ? 'staff' : 'supp');
   const de = e.target.closest('[data-dimedit]');
   if (de) { DIMS.edit = de.dataset.dimedit; go(CURS); return; }
   const dt = e.target.closest('[data-dimtoggle]');
@@ -324,8 +327,10 @@ document.addEventListener('click', e => {
     if (!DIMS.edit && list.some(x => x.name === name)) { toast('已存在同名记录'); return; }
     const rec = DIMS.edit ? list.find(x => x.id === DIMS.edit)
       : (list.push({ id: uid() }), list[list.length - 1]);
-    Object.assign(rec, { name, taxno: ($('dmTax') || {}).value || '', contact: ($('dmContact') || {}).value || '',
-      phone: ($('dmPhone') || {}).value || '', memo: ($('dmMemo') || {}).value || '' });
+    Object.assign(rec, { name, code: (($('dmCode') || {}).value || '').trim(),
+      taxno: ($('dmTax') || {}).value || '', contact: ($('dmContact') || {}).value || '',
+      phone: ($('dmPhone') || {}).value || '', memo: ($('dmMemo') || {}).value || '',
+      dept: (($('dmDept') || {}).value || '').trim() });
     dimSave(kind, list); DIMS.edit = '';
     toast('已保存'); go(CURS); return;
   }
@@ -343,9 +348,9 @@ document.addEventListener('click', e => {
   }
   if (act === 'dimExp') {
     const kind = kindOf(); const list = dimLoad(kind);
-    download(`${kind === 'cust' ? '客户' : '供应商'}名册_${entName()}.csv`,
-      toCSV([['名称', '纳税人识别号', '联系人', '电话', '备注', '状态']]
-        .concat(list.map(x => [x.name, x.taxno || '', x.contact || '', x.phone || '', x.memo || '', x.off ? '停用' : '启用']))));
+    download(`${DIM_NAME[kind]}名册_${entName()}.csv`,
+      toCSV([['编码', '名称', '纳税人识别号', '联系人', '电话', '备注', '状态']]
+        .concat(list.map(x => [x.code || '', x.name, x.taxno || '', x.contact || '', x.phone || '', x.memo || '', x.off ? '停用' : '启用']))));
     toast('已导出'); return;
   }
   if (act === 'pjSave') {
@@ -367,4 +372,372 @@ document.addEventListener('click', e => {
     saveRSet(CUR_ENT, RS); DIMS.edit = '';
     toast('已保存'); go('bs-proj'); return;
   }
+});
+
+/* ============ 部门 / 职员维护 ============ */
+/* 跟客户/供应商同一套存储（fsc_dim_<类别>_<主体>_v1），只是字段少：
+   编码 + 名称 + 备注（职员多一个所属部门）。金蝶那边就是这四类辅助核算，
+   凭证模版的「部门」「职员」两列填的是编码，所以编码必须留住。 */
+const DIM_NAME = { cust: '客户', supp: '供应商', dept: '部门', staff: '职员' };
+
+function dimSimpleScreen(kind) {
+  const nm = DIM_NAME[kind];
+  if (!CUR_ENT) return needEnt(nm + '维护');
+  const list = dimLoad(kind);
+  const editing = DIMS.edit ? list.find(x => x.id === DIMS.edit) : null;
+  const depts = dimLoad('dept');
+  const rows = list.map(x => [
+    x.code ? `<span class="code">${H(x.code)}</span>` : '<span class="mut">—</span>',
+    H(x.name),
+    ...(kind === 'staff' ? [H(x.dept || '—')] : []),
+    H(x.memo || '—'),
+    x.off ? pill('停用', 'wa') : pill('启用', 'ok'),
+    `<button class="btn sm" data-dimedit="${H(x.id)}">编辑</button>
+     <button class="btn sm" data-dimtoggle="${H(x.id)}">${x.off ? '启用' : '停用'}</button>
+     <button class="btn sm" data-dimdel="${H(x.id)}">删除</button>`,
+  ]);
+  return head(nm + '维护', `${H(entName())} · ${nm}是凭证上的辅助核算之一，按主体隔离。金蝶导入模版的「${nm}」列填的是编码。`, '基础 · 辅助核算',
+    `<button class="btn" data-go="bs-imp">批量导入</button>
+     <button class="btn pri" data-act="dimExp">导出</button>`)
+    + kpis([
+      { k: nm + '数', v: String(list.length), u: '个' },
+      { k: '停用', v: String(list.filter(x => x.off).length), u: '个' },
+    ])
+    + cardp(editing ? `编辑：${H(editing.name)}` : '新增' + nm, `
+      <div class="cols c4">
+        <div class="field"><label class="fl">编码</label><input id="dmCode" value="${editing ? H(editing.code || '') : ''}" placeholder="如 1001"></div>
+        <div class="field"><label class="fl">名称 <span class="red">*</span></label><input id="dmName" value="${editing ? H(editing.name) : ''}"></div>
+        ${kind === 'staff' ? `<div class="field"><label class="fl">所属部门</label>
+          <input id="dmDept" list="dmDeptList" value="${editing ? H(editing.dept || '') : ''}" placeholder="选或填">
+          <datalist id="dmDeptList">${depts.map(d => `<option value="${H(d.name)}">`).join('')}</datalist></div>` : ''}
+        <div class="field"><label class="fl">备注</label><input id="dmMemo" value="${editing ? H(editing.memo || '') : ''}"></div>
+      </div>
+      <div style="text-align:right;margin-top:9px">
+        ${editing ? '<button class="btn" data-act="dimCancel">取消</button> ' : ''}
+        <button class="btn pri" data-act="dimSave">${editing ? '保存修改' : '新增'}</button></div>`)
+    + card('名册', rows.length ? table(
+      [{ t: '编码' }, { t: '名称' }, ...(kind === 'staff' ? [{ t: '所属部门' }] : []),
+        { t: '备注' }, { t: '状态' }, { t: '' }], rows)
+      : `<div style="padding:26px;text-align:center;color:var(--text-3)">还没有${nm}——手工新增，或去「主数据导入」把金蝶导出的辅助核算表整份导进来</div>`);
+}
+S['bs-dept'] = () => dimSimpleScreen('dept');
+S['bs-staff'] = () => dimSimpleScreen('staff');
+
+/* ============ 主数据导入 ============ */
+/* 金蝶那边导出的两类表，一次全导进来（可多选文件）：
+   ① 科目余额表 —— 建科目 + 落两张系统凭证：
+      「年初余额」（2025-12-31）与「本年累计」（期间末日）。
+      为什么要拆两张：期末余额 = 年初 + 本年累计发生额，
+      拆开之后 8 月起的账簿三组数才各就各位——
+      期初 = 年初 + 本年累计（= 上期期末）、本期 = 只有 8 月自己录的凭证、
+      本年累计 = 1〜7 月 + 8 月。三张报表跟着自动对上。
+   ② 辅助核算表（客户/供应商/项目/部门/职员）—— 各进各的名册，按编码认、重复即更新。 */
+const MDI = { files: [] };
+const MDI_KIND = { 客户: 'cust', 供应商: 'supp', 部门: 'dept', 职员: 'staff', 项目: 'proj' };
+const YTD_ID = '__ytd__';
+const mdiTrim = v => String(v == null ? '' : v).replace(/\s|　/g, '');
+const mdiNum = v => {
+  const n = Number(String(v == null ? '' : v).replace(/[,，¥￥\s]/g, ''));
+  return isNaN(n) ? 0 : n;
+};
+
+/* 认表：辅助核算表第一行就是 类别|编码|名称；科目余额表要找「科目编码」那行 */
+function mdiSniff(rows) {
+  for (let i = 0; i < Math.min(rows.length, 8); i++) {
+    const r = (rows[i] || []).map(mdiTrim);
+    if (r[0] === '类别' && r[1] === '编码' && r[2] === '名称') {
+      const first = (rows[i + 1] || []).map(mdiTrim);
+      const kind = MDI_KIND[first[0]];
+      return kind ? { type: 'aux', kind, kindName: first[0], head: i }
+        : { type: '?', why: '认不出是哪类辅助核算：' + (first[0] || '(空)') };
+    }
+    if (r.some(c => c === '科目编码')) {
+      // 合并单元格被解析成左右两格同名（期初余额|期初余额），
+      // 只认第一次出现的那格——它才是借方列，紧挨着的下一格是贷方
+      const col = {};
+      const put = (k, j) => { if (col[k] === undefined) col[k] = j; };
+      r.forEach((c, j) => {
+        if (c === '科目编码') put('code', j);
+        else if (c === '科目名称') put('name', j);
+        else if (/^期初/.test(c)) put('ob', j);
+        else if (/^本期/.test(c)) put('cur', j);
+        else if (/^本年/.test(c)) put('ytd', j);
+        else if (/^期末/.test(c)) put('eb', j);
+      });
+      if (col.code === undefined || col.eb === undefined || col.ytd === undefined) {
+        return { type: '?', why: '像科目余额表，但缺「期末余额」或「本年累计发生额」列' };
+      }
+      // 下一行是「借方/贷方」子表头的话，数据从再下一行开始
+      const sub = (rows[i + 1] || []).map(mdiTrim);
+      const dataFrom = sub.some(c => c === '借方' || c === '贷方') ? i + 2 : i + 1;
+      return { type: 'bal', head: i, col, dataFrom };
+    }
+  }
+  return { type: '?', why: '既不像科目余额表，也不像辅助核算表' };
+}
+
+/* 期间末日：从「2026年第7期」这种字样里抠，抠不出就用当前期间 */
+function mdiPeriodEnd(rows) {
+  const txt = rows.slice(0, 4).map(r => (r || []).join(' ')).join(' ');
+  const m = /(\d{4})\s*年\s*第?\s*(\d{1,2})\s*期/.exec(txt) || /(\d{4})[-/](\d{1,2})/.exec(txt);
+  if (!m) return '';
+  const y = +m[1], mo = +m[2];
+  const last = new Date(y, mo, 0).getDate();
+  return `${y}-${String(mo).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+}
+
+async function mdiLoad(fileList) {
+  const files = [].slice.call(fileList || []);
+  if (!files.length) return;
+  toast(`正在解析 ${files.length} 份文件…`);
+  const ok = [], bad = [];
+  for (const file of files) {
+    try {
+      const rows = await XLSXLite.readTable(file);
+      const sn = mdiSniff(rows);
+      ok.push({ fileName: file.name, rows, sn, periodEnd: sn.type === 'bal' ? mdiPeriodEnd(rows) : '' });
+    } catch (e) { bad.push(file.name + '：' + e.message); }
+  }
+  if (!ok.length) { toast('读取失败：' + bad.join('；'), 4600); return; }
+  MDI.files = MDI.files.concat(ok);
+  go('bs-imp');
+  toast(`读到 ${ok.length} 份` + (bad.length ? `；${bad.length} 份读不了` : ''), 4200);
+}
+
+/* 辅助核算表 → 名册条目 */
+function mdiAuxPlan(f) {
+  const { head, kind } = f.sn;
+  const c = (f.rows[head] || []).map(mdiTrim);
+  const items = [];
+  f.rows.slice(head + 1).forEach(r => {
+    const at = n => { const j = c.indexOf(n); return j < 0 ? '' : String(r[j] == null ? '' : r[j]).trim(); };
+    const code = at('编码'), name = at('名称');
+    if (!name) return;
+    items.push({ code, name, memo: at('备注'), dept: at('部门'), off: at('启用状态') === '否' ? 1 : 0 });
+  });
+  if (kind === 'proj') {
+    const have = new Set(((RS && RS.projects) || []).map(p => p.code));
+    return { kind, items, add: items.filter(x => !have.has(x.code)).length, upd: items.filter(x => have.has(x.code)).length };
+  }
+  const list = dimLoad(kind);
+  const hit = x => list.find(v => (x.code && v.code === x.code) || v.name === x.name);
+  return { kind, items, add: items.filter(x => !hit(x)).length, upd: items.filter(x => hit(x)).length };
+}
+
+/* 科目余额表 → 科目清单 + 两张凭证的行 */
+function mdiBalPlan(f) {
+  const { col, dataFrom } = f.sn;
+  const raw = [];
+  f.rows.slice(dataFrom).forEach(r => {
+    const code = mdiTrim(r[col.code]);
+    if (!code || !/^\d/.test(code)) return;          // 小计/合计行没有科目编码
+    raw.push({
+      code, name: String(r[col.name] == null ? '' : r[col.name]).trim(),
+      ebDr: mdiNum(r[col.eb]), ebCr: mdiNum(r[col.eb + 1]),
+      ydr: mdiNum(r[col.ytd]), ycr: mdiNum(r[col.ytd + 1]),
+    });
+  });
+  // 末级才取数：上级科目是下级之和，两头都取会翻倍
+  const codes = raw.map(x => x.code);
+  const isLeaf = c => !codes.some(x => x !== c && x.startsWith(c));
+  const leaves = raw.filter(x => isLeaf(x.code));
+
+  // 科目表：项目后缀（5001_2001）不是科目，砍掉后缀再去重
+  const acctSeen = new Set(), accts = [];
+  raw.forEach(x => {
+    const base = x.code.split('_')[0];
+    if (acctSeen.has(base)) return;
+    acctSeen.add(base);
+    const nm = x.name.split('_').slice(0, x.code.includes('_') ? -1 : undefined).join('_') || x.name;
+    accts.push({ code: base, name: nm, exists: !!bsFind(base) });
+  });
+
+  /* 金蝶那边损益科目每月结转过（收入借贷各一次、期末为 0），本系统不做结转、
+     损益累计到年末才滚进未分配利润。原样导会让利润表本年累计全变成 0，
+     所以损益科目只导自然方向那一半（收入取贷方累计、成本费用取借方累计），
+     结转那一半连同「本年利润」科目整段丢掉——丢掉的借贷两边金额相等，凭证仍然平。
+     代价：期间内红字冲销的部分会算进毛额里（结转与冲红在累计数上分不开）。 */
+  const isPnl = c => /^5/.test(c);
+  const isCarry = c => /^(3103|4103)/.test(c);       // 本年利润：本年发生额全是结转
+  const ob = [], ytd = [];
+  let dropDr = 0, dropCr = 0;
+  leaves.forEach(x => {
+    const base = x.code.split('_')[0];
+    const ytdNet = x.ydr - x.ycr;
+    const ebNet = x.ebDr - x.ebCr;
+    const obNet = +(ebNet - ytdNet).toFixed(2);      // 年初 = 期末 − 本年累计发生净额（用原始数）
+    if (Math.abs(obNet) > 0.005) {
+      ob.push({ acct: x.code, name: x.name, memo: '年初余额（金蝶导入）',
+        dr: obNet > 0 ? obNet : 0, cr: obNet < 0 ? -obNet : 0 });
+    }
+    let dr = x.ydr, cr = x.ycr;
+    if (isCarry(base)) { dropDr += dr; dropCr += cr; dr = 0; cr = 0; }
+    else if (isPnl(base)) {
+      const carry = Math.min(Math.abs(dr), Math.abs(cr));
+      if (bsDir(base) === '贷') { dropDr += carry; dr = +(dr - carry).toFixed(2); }
+      else { dropCr += carry; cr = +(cr - carry).toFixed(2); }
+    }
+    if (Math.abs(dr) > 0.005 || Math.abs(cr) > 0.005) {
+      ytd.push({ acct: x.code, name: x.name, memo: '本年累计发生额（金蝶导入）',
+        dr: +dr.toFixed(2), cr: +cr.toFixed(2) });
+    }
+  });
+  const sum = (l, k) => +l.reduce((s, x) => s + x[k], 0).toFixed(2);
+  /* 丢结转时，损益科目上「贷方冲红」这类跟结转混在一起的部分分不开，
+     两边丢的金额可能差几百块。差额单独挂一行本年利润，凭证保持借贷平——
+     它在利润表里不参与行次，在资产负债表里跟损益一起滚进未分配利润，两头都不歪。 */
+  const carryDiff = +(sum(ytd, 'dr') - sum(ytd, 'cr')).toFixed(2);
+  if (Math.abs(carryDiff) > 0.005) {
+    ytd.push({ acct: '3103', name: '本年利润', memo: '结转差额（导入平衡）',
+      dr: carryDiff < 0 ? -carryDiff : 0, cr: carryDiff > 0 ? carryDiff : 0 });
+  }
+  return {
+    accts, leaves: leaves.length, rows: raw.length, ob, ytd, carryDiff,
+    dropDr: +dropDr.toFixed(2), dropCr: +dropCr.toFixed(2),
+    obDiff: +(sum(ob, 'dr') - sum(ob, 'cr')).toFixed(2),
+    ytdDiff: +(sum(ytd, 'dr') - sum(ytd, 'cr')).toFixed(2),
+    obDr: sum(ob, 'dr'), ytdDr: sum(ytd, 'dr'),
+    newAccts: accts.filter(a => !a.exists).length,
+  };
+}
+
+const mdiPlan = f => (f.sn.type === 'aux' ? mdiAuxPlan(f) : f.sn.type === 'bal' ? mdiBalPlan(f) : null);
+
+function mdiApply() {
+  if (!CUR_ENT) { toast('先在右上角选主体'); return; }
+  if (!RS) RS = initRSet(CUR_ENT);
+  let nAux = 0, nAcct = 0, nOb = 0, nYtd = 0, nFile = 0;
+  const done = [];
+
+  MDI.files.forEach(f => {
+    if (f.sn.type === 'aux') {
+      const p = mdiAuxPlan(f);
+      if (p.kind === 'proj') {
+        RS.projects = RS.projects || [];
+        p.items.forEach(x => {
+          const hit = RS.projects.find(v => v.code === x.code);
+          if (hit) hit.name = x.name;                       // kw 是本地养出来的，导入不覆盖
+          else RS.projects.push({ code: x.code, name: x.name, kw: '' });
+          nAux++;
+        });
+        saveRSet(CUR_ENT, RS);
+      } else {
+        const list = dimLoad(p.kind);
+        p.items.forEach(x => {
+          const hit = list.find(v => (x.code && v.code === x.code) || v.name === x.name);
+          if (hit) Object.assign(hit, { code: x.code || hit.code, name: x.name, memo: x.memo || hit.memo, dept: x.dept || hit.dept, off: x.off });
+          else list.push({ id: uid(), code: x.code, name: x.name, memo: x.memo, dept: x.dept, off: x.off });
+          nAux++;
+        });
+        dimSave(p.kind, list);
+      }
+      done.push(DIM_NAME[p.kind] || '项目');
+      nFile++;
+    } else if (f.sn.type === 'bal') {
+      const p = mdiBalPlan(f);
+      // 科目：标准表里没有的、或名称对不上的，落成本主体自建
+      p.accts.forEach(a => {
+        if (String(a.code).includes('{')) return;
+        const cur = bsFind(a.code);
+        const mine = RS.accounts.find(x => String(x[0]) === a.code);
+        if (mine) { if (a.name && mine[1] !== a.name) { mine[1] = a.name; nAcct++; } return; }
+        if (cur && cur[1] === a.name) return;               // 标准表已有且同名，不必自建
+        RS.accounts.push([a.code, a.name, {}]);
+        nAcct++;
+      });
+      saveRSet(CUR_ENT, RS);
+
+      const list = vchLoad(CUR_ENT).filter(v => v.id !== OB_ID && v.id !== YTD_ID);
+      if (p.ob.length) {
+        list.unshift({ id: OB_ID, period: '2025-12', date: '2025-12-31', word: '期初', no: '0',
+          posted: 1, src: '主数据导入', lines: p.ob });
+        nOb = p.ob.length;
+      }
+      if (p.ytd.length) {
+        const d = f.periodEnd || '2026-07-31';
+        list.unshift({ id: YTD_ID, period: d.slice(0, 7), date: d, word: '累计', no: '0',
+          posted: 1, src: '主数据导入', lines: p.ytd });
+        nYtd = p.ytd.length;
+      }
+      vchSave(CUR_ENT, list);
+      done.push('科目余额表');
+      nFile++;
+    }
+  });
+
+  MDI.files = [];
+  toast(`${nFile} 份导入完成：科目 ${nAcct} 个、辅助核算 ${nAux} 条、年初 ${nOb} 行、本年累计 ${nYtd} 行`, 5200);
+  go('bs-imp');
+}
+
+S['bs-imp'] = () => {
+  if (!CUR_ENT) return needEnt('主数据导入');
+  const tools = `<button class="btn" data-go="bs-acct">科目设置</button>`;
+  const picker = `<input type="file" id="mdiFile" accept=".xlsx,.csv,.txt" multiple>`;
+
+  if (!MDI.files.length) {
+    return head('主数据导入', `${H(entName())} · 金蝶导出的科目余额表与辅助核算表，一次全导进来。`, '基础 · 主数据', tools)
+      + cardp('选择文件', picker
+        + `<div class="note" style="margin-top:11px"><b>可以一次选多份</b>：一份科目余额表 + 客户/供应商/项目/部门/职员五份辅助核算，一起丢进来，系统自己认是哪张表。</div>
+        <div class="note"><b>科目余额表会落两张系统凭证</b>：「年初余额」（2025-12-31）与「本年累计」（期间末日，如 2026-07-31）。
+          年初 = 期末余额 − 本年累计发生净额，倒算出来的。这样从下个月起：<b>期初</b>= 上期期末 ✓、<b>本期发生额</b>= 只有你自己录的凭证 ✓、<b>本年累计</b>= 之前几个月 + 本月 ✓，资产负债表与利润表跟着自动对上。</div>
+        <div class="note w"><b>会覆盖已有的期初。</b>「核算 → 期初余额」页手工录的那张期初凭证，导入时按这份表重写。</div>`);
+  }
+
+  const rows = MDI.files.map((f, i) => {
+    const p = mdiPlan(f);
+    const t = f.sn.type;
+    const what = t === 'aux' ? `辅助核算 · ${H(f.sn.kindName)}` : t === 'bal' ? '科目余额表' : `<span class="red">认不出</span>`;
+    const detail = t === 'aux' ? `${p.items.length} 条（新增 ${p.add} / 更新 ${p.upd}）`
+      : t === 'bal' ? `科目 ${p.accts.length} 个（新建 ${p.newAccts}）· 末级 ${p.leaves} 个 · 年初 ${p.ob.length} 行 · 本年累计 ${p.ytd.length} 行`
+        : `<span class="red">${H(f.sn.why || '')}</span>`;
+    return [
+      H(f.fileName.slice(0, 30)), what, String(f.rows.length), detail,
+      t === 'bal' ? (f.periodEnd || '<span class="red">认不出期间</span>') : '<span class="mut">—</span>',
+      `<button class="btn sm" data-mdirm="${i}">移除</button>`,
+    ];
+  });
+  const bal = MDI.files.map(f => (f.sn.type === 'bal' ? mdiBalPlan(f) : null)).find(Boolean);
+  const usable = MDI.files.filter(f => f.sn.type !== '?').length;
+
+  return head('主数据导入', `${H(entName())} · ${MDI.files.length} 份文件，可导 ${usable} 份`, '基础 · 主数据', tools)
+    + (bal ? kpis([
+      { k: '科目', v: String(bal.accts.length), u: '个' },
+      { k: '其中新建', v: String(bal.newAccts), u: '个', t: bal.newAccts ? 'g' : '' },
+      { k: '年初借方合计', v: money(bal.obDr) },
+      { k: '年初借贷差', v: money(bal.obDiff), t: Math.abs(bal.obDiff) < 0.05 ? 'g' : 'c' },
+      { k: '本年累计借贷差', v: money(bal.ytdDiff), t: Math.abs(bal.ytdDiff) < 0.05 ? 'g' : 'c' },
+    ]) : '')
+    + (bal && Math.abs(bal.obDiff) > 0.05
+      ? `<div class="note c"><b>倒算出来的年初借贷不平，差 ${money(bal.obDiff)}。</b>多半是这份表的期末余额或本年累计发生额本身不平，先在金蝶那边核一下再导。</div>` : '')
+    + (bal ? `<div class="note"><b>损益科目只导自然方向那一半：</b>收入取贷方累计、成本费用取借方累计，
+        金蝶每月结转的那一半（连同「本年利润」科目）不导——本系统不做月度结转，损益累计到出表时才滚进未分配利润，
+        原样导会让利润表本年累计全变 0。${Math.abs(bal.carryDiff) > 0.005
+        ? `本份表结转与冲红分不开，差 <b>${money(Math.abs(bal.carryDiff))}</b>，已单独挂一行 3103 本年利润把凭证配平（不进利润表行次，资产负债表里跟损益一起滚进未分配利润）。` : ''}</div>` : '')
+    + card('文件清单', table(
+      [{ t: '文件' }, { t: '认成什么表' }, { t: '行数', n: 1 }, { t: '会导入什么' }, { t: '期间末日' }, { t: '' }], rows))
+    + cardp('再加文件', picker + `<span class="mut" style="margin-left:9px">再选是往上加</span>`,
+      `<button class="btn sm" data-act="mdiClear">清空</button>`)
+    + (bal ? card('年初余额预览（前 12 行 · 倒算值）', table(
+      [{ t: '科目' }, { t: '名称' }, { t: '年初借方', n: 1 }, { t: '年初贷方', n: 1 }],
+      bal.ob.slice(0, 12).map(l => [`<span class="code">${H(l.acct)}</span>`, H(l.name),
+        l.dr ? money(l.dr) : '', l.cr ? money(l.cr) : '']))) : '')
+    + `<div style="display:flex;gap:9px;justify-content:flex-end;margin-top:6px">
+        <button class="btn pri" data-act="mdiApply" ${usable ? '' : 'disabled'}>全部导入（${usable} 份）</button>
+      </div>`;
+};
+
+document.addEventListener('change', e => {
+  if (e.target.id === 'mdiFile' && e.target.files && e.target.files.length) {
+    const fs = e.target.files; e.target.value = '';
+    mdiLoad(fs);
+  }
+});
+document.addEventListener('click', e => {
+  const rm = e.target.closest('[data-mdirm]');
+  if (rm) { MDI.files.splice(+rm.dataset.mdirm, 1); go('bs-imp'); return; }
+  const a = e.target.closest('[data-act]');
+  if (!a) return;
+  if (a.dataset.act === 'mdiClear') { MDI.files = []; go('bs-imp'); return; }
+  if (a.dataset.act === 'mdiApply') mdiApply();
 });

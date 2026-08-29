@@ -222,6 +222,7 @@ S['iv-vat'] = () => {
   return head('增值税及附加税费申报表' + (p.type === 'small' ? '（小规模纳税人适用）' : '（一般纳税人适用）'),
     `${H(entName())} · 税款所属期 ${IV.month}。销售额 = 销项票 + 无票收入${p.type === 'general' ? '，抵扣 = 进项票 + 上期留抵' : ''}。`, '票据 · 纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
+     <button class="btn" data-act="ivVchVat">生成凭证</button>
      <button class="btn pri" data-act="ivExpVat">导出</button>`)
     + profBar
     + kpis([
@@ -264,6 +265,7 @@ S['iv-cit'] = () => {
   return head('企业所得税月（季）度预缴纳税申报表（A类）',
     `${H(entName())} · ${q.y} 年第 ${q.q} 季度（累计 ${q.y}-01-01 起）。${note}。`, '票据 · 纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
+     <button class="btn" data-act="ivVchCit">生成凭证</button>
      <button class="btn pri" data-act="ivExpCit">导出</button>`)
     + `<div class="note"><b>数据来源：</b>
       <label><input type="radio" name="citSrc" value="book" ${src === 'book' ? 'checked' : ''}> 本系统利润表（推荐，与账一致）</label>
@@ -326,6 +328,7 @@ S['iv-stamp'] = () => {
   return head('印花税申报表', `${H(entName())} · 税款所属期 ${IV.month}。计税金额按合同/账簿实际填，右侧税额实时算${k === 0.5 ? '（小规模六税两费减半已含）' : ''}。`, '票据 · 纳税申报',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
      <button class="btn" data-act="stampSave">保存</button>
+     <button class="btn" data-act="ivVchStamp">生成凭证</button>
      <button class="btn pri" data-act="ivExpStamp">导出</button>`)
     + `<div class="note"><b>计税金额要按实际签的合同填</b>，系统只给参考：本月进项票不含税 ${money(inAmt)}、销项票不含税 ${money(outAmt)}（买卖合同可参考）；账上实收资本+资本公积 ${money(capital)}（营业账簿税目，首次或增资当期才计）。没签合同的税目留空。</div>`
     + kpis([
@@ -335,6 +338,87 @@ S['iv-stamp'] = () => {
     + card('按税目填报', table([{ t: '税目' }, { t: '税率' }, { t: '计税金额', n: 1 }, { t: '应纳税额', n: 1 }], rows,
       ['<b>合计</b>', '', '', `<b>${money(+total.toFixed(2))}</b>`]));
 };
+
+/* ============ 申报表 → 生成凭证 ============ */
+/* 每张申报表可一键生成计提凭证，直接进凭证库：
+   - 固定 id（按主体+税种+期间），重复点是覆盖不是重复入库
+   - 一律「未过账」状态入库——申报数字该有人核对一遍再过账，
+     报表首页的未过账检查会盯着它
+   - 增值税本身在 T2 拆销项税时已逐笔计提，这里补的是月末那几笔：
+     附加税费计提 / 小规模免税转收入 / 一般纳税人结转未交增值税 */
+const ivMonthEnd = m => { const [y, mo] = m.split('-'); return m + '-' + String(new Date(+y, +mo, 0).getDate()).padStart(2, '0'); };
+function ivPushVoucher(id, date, lines) {
+  lines = lines.filter(l => l.dr > 0.005 || l.cr > 0.005);
+  if (!lines.length) { toast('金额为零，本期无需生成凭证'); return; }
+  const before = vchLoad(CUR_ENT);
+  const list = before.filter(v => v.id !== id);
+  const existed = list.length !== before.length;
+  list.push({ id, period: date.slice(0, 7), date, word: '记', no: '税', posted: 0, src: '申报表生成', lines });
+  vchSave(CUR_ENT, list);
+  toast((existed ? '已重新生成（覆盖原凭证）' : '凭证已生成') + '：' + lines.length + ' 行，未过账。去凭证库核对后过账。', 5200);
+  go('ac-vch');
+}
+const IVL = (acct, name, dr, cr, memo) => ({ acct, name, dr: +(+dr).toFixed(2), cr: +(+cr).toFixed(2), memo });
+
+function ivVchVat() {
+  const d = ivVatData(IV.month);
+  const date = ivMonthEnd(IV.month);
+  const memo = IV.month + ' 增值税申报计提';
+  const lines = [];
+  if (d.p.type === 'small') {
+    if (d.free) {
+      // 免征：把本月已逐笔计提的销项税额转营业外收入（小企业准则做法）
+      if (d.saleTax > 0.005) {
+        lines.push(IVL('22210107', '应交税费_应交增值税_销项税额', d.saleTax, 0, memo + '（免征，销项税转收入）'));
+        lines.push(IVL('5301', '营业外收入', 0, d.saleTax, memo + '（免征转收入）'));
+      }
+    } else if (d.vat > 0.005) {
+      lines.push(IVL('5403', '税金及附加', d.sur.sum, 0, memo + '（附加税费）'));
+      lines.push(IVL('222106', '应交税费_城建税', 0, d.sur.c, memo));
+      lines.push(IVL('222107', '应交税费_教育费附加', 0, d.sur.e, memo));
+      lines.push(IVL('222108', '应交税费_地方教育附加', 0, d.sur.l, memo));
+    }
+  } else {
+    if (d.vat > 0.005) {
+      lines.push(IVL('222101', '应交税费_应交增值税', d.vat, 0, memo + '（结转未交增值税）'));
+      lines.push(IVL('222110', '应交税费_未交增值税', 0, d.vat, memo));
+      lines.push(IVL('5403', '税金及附加', d.sur.sum, 0, memo + '（附加税费）'));
+      lines.push(IVL('222106', '应交税费_城建税', 0, d.sur.c, memo));
+      lines.push(IVL('222107', '应交税费_教育费附加', 0, d.sur.e, memo));
+      lines.push(IVL('222108', '应交税费_地方教育附加', 0, d.sur.l, memo));
+    }
+  }
+  ivPushVoucher('__tax_vat_' + IV.month + '__', date, lines);
+}
+function ivVchCit() {
+  const q = ivQuarterOf(IV.month);
+  const adj = ivAdj('q' + q.y + q.q);
+  // 与页面同一套算法：这里只重算应补数，避免两处口径漂移
+  let profit = 0;
+  if ((adj.citSrc || 'book') === 'book') { profit = rptPlData(q.y + '-01-01', q.to + '-31').total; }
+  else profit = numOf(adj.citProfit);
+  const taxable = Math.max(0, +(profit - numOf(adj.loss)).toFixed(2));
+  const due = +(taxable * (taxable <= 3000000 ? 0.05 : 0.25)).toFixed(2);
+  const pay = Math.max(0, +(due - numOf(adj.paid)).toFixed(2));
+  const memo = q.y + '年Q' + q.q + ' 企业所得税预缴计提';
+  ivPushVoucher('__tax_cit_' + q.y + 'q' + q.q + '__', ivMonthEnd(q.to), [
+    IVL('5801', '所得税费用', pay, 0, memo),
+    IVL('222105', '应交税费_应交企业所得税', 0, pay, memo),
+  ]);
+}
+function ivVchStamp() {
+  const p = ivProf();
+  const adj = ivAdj('st' + IV.month);
+  const k = (p.type === 'small' && p.halve) ? 0.5 : 1;
+  let total = 0;
+  STAMP_ITEMS.forEach(it => { total += +((numOf(adj[it[0]]) || 0) * it[2] * k).toFixed(2); });
+  total = +total.toFixed(2);
+  const memo = IV.month + ' 印花税计提';
+  ivPushVoucher('__tax_stamp_' + IV.month + '__', ivMonthEnd(IV.month), [
+    IVL('5403', '税金及附加', total, 0, memo),
+    IVL('222109', '应交税费_印花税', 0, total, memo),
+  ]);
+}
 
 /* ============ 事件 ============ */
 document.addEventListener('change', e => {
@@ -368,6 +452,9 @@ document.addEventListener('click', e => {
   const a = e.target.closest('[data-act]');
   if (!a || !CUR_ENT) return;
   const act = a.dataset.act;
+  if (act === 'ivVchVat') { ivVchVat(); return; }
+  if (act === 'ivVchCit') { ivVchCit(); return; }
+  if (act === 'ivVchStamp') { ivVchStamp(); return; }
   if (act === 'ivUpIn' || act === 'ivUpOut') {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.xlsx,.csv,.txt';

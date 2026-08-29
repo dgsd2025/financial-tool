@@ -59,7 +59,7 @@ const DOMS = [
       ['iv-in', '进项票'], ['iv-out', '销项票'], ['iv-noinv', '无票收入'],
       ['--纳税申报'],
       ['iv-vat', '增值税申报'], ['iv-cit', '所得税申报'], ['iv-stamp', '印花税申报'],
-      ['iv-iit', '个税申报'], ['iv-social', '社保申报'], ['iv-dbf', '残保金申报'], ['iv-portal', '电子税务局'] ] },
+      ['iv-iit', '个税申报'], ['iv-pay', '员工与工资表'], ['iv-social', '社保申报'], ['iv-dbf', '残保金申报'], ['iv-portal', '电子税务局'] ] },
   { id: 'ar', n: '应收', ic: '◫', items: [['p-ar-contract', '合同台账'], ['p-ar-bill', '应收账单'], ['p-ar-claim', '收款认领'], ['p-ar-aging', '账龄与催收']] },
   { id: 'cost', n: '费控', ic: '▧', items: [['p-exp', '报销与费控'], ['p-flow', '审批路由']] },
   { id: 'close', n: '核算', ic: '▩', ready: 1, items: [
@@ -819,8 +819,8 @@ S['tool-rules'] = () => {
       + `<div class="note"><b>先建科目表，再建规则。</b>规则的本质是「什么样的流水 → 记哪个科目」，没有科目表就无从建起。</div>`
       + `<div class="cols c2">
         ${cardp('从通用模板起步（推荐）', `<div style="font-size:12.5px;line-height:1.8">
-          套用 ${ACC_TPL.length} 个常用科目（现金、银行存款、往来、收入成本、三大费用），
-          再按贵司实际增删。</div>
+          小企业会计准则标准科目表（${SE_CHART.length} 个）已自动配齐，直接可用；
+          更细的明细科目去「基础 → 科目设置」加。</div>
           `)}
         ${cardp('从别的主体复制', `<div style="font-size:12.5px;line-height:1.8">
           业务相近的主体可以直接复制它的科目表与规则，再改。</div>

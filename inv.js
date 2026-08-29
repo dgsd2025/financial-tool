@@ -18,7 +18,8 @@ function ivSave(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catc
 function ivProf() {
   try { const p = JSON.parse(localStorage.getItem(IV_PROF_KEY(CUR_ENT)) || 'null'); if (p) return p; } catch (e) { /* 忽略 */ }
   // 默认小规模 1%——集团各主体现行做法（优栖租金按 1% 拆税），改了当场生效
-  return { type: 'small', rate: 0.01, halve: 1 };
+  // biz: 销售额放哪一栏（goods=货物及劳务 / estate=服务不动产）；cjRate: 城建税率（市区7%/县镇5%/其他1%）
+  return { type: 'small', rate: 0.01, halve: 1, biz: 'goods', cjRate: 0.07 };
 }
 function ivProfSave(p) { try { localStorage.setItem(IV_PROF_KEY(CUR_ENT), JSON.stringify(p)); } catch (e) { /* 忽略 */ } }
 function ivAdj(m) { try { return JSON.parse(localStorage.getItem(IV_ADJ_KEY(CUR_ENT, m)) || '{}'); } catch (e) { return {}; } }
@@ -134,13 +135,17 @@ S['iv-noinv'] = () => {
     money(x.net), money(x.tax),
     `<button class="btn sm" data-ivdel="noinv:${H(x.id)}">删除</button>`,
   ]);
-  return head('无票收入', `${H(entName())} · 收了钱没开票的收入也要申报。录含税金额，按征收率自动拆不含税与税额，进增值税申报表的销售额。`, '纳税申报 · ' + IV.month,
-    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">`)
+  return head('无票收入', `${H(entName())} · 收了钱没开票的收入也要申报。录含税金额，按征收率自动拆不含税与税额，进增值税申报表「未开具发票」列。`, '纳税申报 · ' + IV.month,
+    `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
+     <button class="btn pri" data-act="ivDyUp">导入抖音资金账单</button>`)
     + kpis([
       { k: '本月笔数', v: String(cur.length), u: '笔' },
       { k: '不含税收入', v: money(net) },
       { k: '税额', v: money(tax) },
     ])
+    + `<div class="note"><b>抖音账单导入口径：</b>吃抖店「资金账单」明细表——只取「入账」方向且场景含
+      「结算入账」的（货款结算/福袋业务结算），按月按场景归并成无票收入；提现、保险、运费险不是收入，自动跳过。
+      同一份文件重复导入是覆盖不是叠加。</div>`
     + cardp('新增一笔', `<div class="cols c4">
         <div class="field"><label class="fl">日期</label><input type="date" id="nvDate" value="${IV.month}-15" min="2026-01-01"></div>
         <div class="field"><label class="fl">含税金额</label><input type="number" step="0.01" id="nvGross" placeholder="0.00"></div>
@@ -154,86 +159,242 @@ S['iv-noinv'] = () => {
       : `<div style="padding:26px;text-align:center;color:var(--text-3)">本月没有无票收入</div>`);
 };
 
-/* ============ 增值税申报表 ============ */
-/* 汇一个月的三个来源：销项票 + 无票收入（销售额侧）、进项票（一般纳税人抵扣侧）。 */
-function ivVatData(m) {
-  const p = ivProf();
-  const out = ivLoad(IV_OUT_KEY(CUR_ENT)).filter(x => x.month === m);
-  const noinv = ivLoad(IV_NOINV_KEY(CUR_ENT)).filter(x => x.month === m);
-  const inn = ivLoad(IV_IN_KEY(CUR_ENT)).filter(x => x.month === m);
-  const saleNet = out.reduce((s, x) => s + x.amt, 0) + noinv.reduce((s, x) => s + x.net, 0);
-  const saleTax = out.reduce((s, x) => s + x.tax, 0) + noinv.reduce((s, x) => s + x.tax, 0);
-  const inTax = inn.reduce((s, x) => s + x.tax, 0);
-  const adj = ivAdj(m);
-  if (p.type === 'small') {
-    const free = saleNet <= 100000;   // 月销售额≤10万免征（2026 现行政策）
-    const vat = free ? 0 : +(saleNet * p.rate).toFixed(2);
-    return { p, saleNet, saleTax, inTax, free, vat, adj,
-      sur: ivSur(vat, p), cnt: { out: out.length, noinv: noinv.length, in: inn.length } };
+/* ============ 抖音资金账单 → 无票收入 ============ */
+/* 学自真实账单（澳乐官方旗舰店 2607）：明细页列 = 动账时间(Excel序列数)/
+   动账方向(入账/出账)/动账金额/动账场景(货款结算入账/福袋业务结算入账/提现/权益保险/退换货运费险)。
+   收入 = 入账 且 场景含「结算入账」；其余是资金调拨或费用，不进销售额。 */
+const ivExcelDate = v => {
+  const n = +v;
+  if (!isNaN(n) && n > 40000 && n < 60000) {
+    const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+    return d.toISOString().slice(0, 10);
   }
-  const carry = numOf(adj.carry);   // 上期留抵，手工填
-  const deduct = Math.min(saleTax, inTax + carry);
-  const vat = +(saleTax - deduct).toFixed(2);
-  return { p, saleNet, saleTax, inTax, carry, deduct, vat,
-    carryEnd: +(inTax + carry - deduct).toFixed(2), free: false, adj,
-    sur: ivSur(vat, p), cnt: { out: out.length, noinv: noinv.length, in: inn.length } };
+  return normDate(String(v));
+};
+async function ivDyImport(file) {
+  try {
+    toast('正在解析…');
+    // 抖音账单第一页是汇总透视、第二页才是明细——逐表找含「动账时间」列的那页
+    const sheets = await XLSXLite.readSheets(file);
+    let rows = null, hr = 0, iDir = -1, iScene = -1, iAmt = -1, iDate = -1;
+    for (const sh of sheets) {
+      const h = XLSXLite.findHeaderRow(sh, ['动账方向', '动账场景', '动账金额', '动账时间']);
+      const cells = (sh[h] || []).map(c => String(c == null ? '' : c).replace(/\s/g, ''));
+      const col = n => cells.findIndex(c => c.includes(n));
+      if (col('动账时间') >= 0 && col('动账金额') >= 0) {
+        rows = sh; hr = h;
+        iDir = col('动账方向'); iScene = col('动账场景'); iAmt = col('动账金额'); iDate = col('动账时间');
+        break;
+      }
+    }
+    if (!rows || iDir < 0 || iScene < 0) {
+      toast('没找到明细页：需要含 动账时间/动账方向/动账金额/动账场景 四列的工作表', 6200); return;
+    }
+    const p = ivProf();
+    const groups = {};
+    let skipped = 0;
+    rows.slice(hr + 1).forEach(r => {
+      const dir = String(r[iDir] == null ? '' : r[iDir]).trim();
+      const scene = String(r[iScene] == null ? '' : r[iScene]).trim();
+      const amt = numOf(r[iAmt]);
+      if (!dir || !amt) return;
+      if (dir !== '入账' || !/结算入账/.test(scene)) { skipped++; return; }
+      const date = ivExcelDate(r[iDate]);
+      if (!date || date < '2026-01-01') return;
+      const k = date.slice(0, 7) + '|' + scene;
+      const g = groups[k] = groups[k] || { gross: 0, cnt: 0, lastDate: date };
+      g.gross += amt; g.cnt++;
+      if (date > g.lastDate) g.lastDate = date;
+    });
+    const ks = Object.keys(groups).sort();
+    if (!ks.length) { toast('没找到「入账·结算入账」的行——确认导的是明细那页', 5200); return; }
+    const key = IV_NOINV_KEY(CUR_ENT);
+    const list = ivLoad(key).filter(x => x.src !== file.name);   // 同文件重复导入=覆盖
+    let total = 0;
+    ks.forEach(k => {
+      const [month, scene] = k.split('|');
+      const g = groups[k];
+      const gross = +g.gross.toFixed(2);
+      const net = +(gross / (1 + p.rate)).toFixed(2);
+      total += gross;
+      list.push({ id: uid(), date: g.lastDate, month, gross, rate: p.rate, net,
+        tax: +(gross - net).toFixed(2), memo: '抖音-' + scene + '（' + g.cnt + '笔）', src: file.name });
+    });
+    ivSave(key, list);
+    IV.month = ks[0].split('|')[0];
+    toast(`已导入 ${ks.length} 组、含税合计 ${money(+total.toFixed(2))}（按 ${(p.rate * 100).toFixed(0)}% 拆税）；提现/保险等非收入行跳过 ${skipped} 条。`, 6200);
+    go('iv-noinv');
+  } catch (e) { toast('读取失败：' + e.message, 4200); }
 }
-/* 附加税费：城建 7% + 教育费附加 3% + 地方教育 2%，基数=实缴增值税；
-   小规模六税两费减半（档案里可关） */
+
+/* ============ 增值税申报表 ============ */
+/* 口径全部学自负责人给的真实申报表：
+   - 小规模：按季申报（优栖 2026Q1 真表）；季度销售额 ≤30 万全额进
+     「免税销售额-小微企业」，免税额按法定征收率算（84,087.25×3%=2,522.62 对上）；
+     两栏分列「货物及劳务 / 服务、不动产和无形资产」按税务档案放列；
+     减按 1% 时：应纳按 3% 计、减征额 2%，合计落 1%
+   - 一般纳税人：按月（优趣 2026-02 真表）；无票收入落附列资料一
+     「未开具发票」列；上期留抵→实际抵扣→期末留抵链条；本年累计列
+   - 附加税费：计税依据=增值税税额；城建税率可配（真表中山 5%、广州 7%）；
+     六税两费减半小规模与小型微利一般纳税人都适用 */
+/* 附加税费：城建（税率按档案，市区7%/县镇5%）+ 教育费附加3% + 地方教育2%。
+   六税两费减半：小规模纳税人和小型微利企业都适用（学自优趣真表——
+   一般纳税人小微也减了 50%），档案里可关。 */
 function ivSur(vat, p) {
-  const k = (p.type === 'small' && p.halve) ? 0.5 : 1;
-  const c = +(vat * 0.07 * k).toFixed(2), e = +(vat * 0.03 * k).toFixed(2), l = +(vat * 0.02 * k).toFixed(2);
-  return { c, e, l, sum: +(c + e + l).toFixed(2), halved: k === 0.5 };
+  const k = p.halve ? 0.5 : 1;
+  const cj = p.cjRate || 0.07;
+  const c = +(vat * cj * k).toFixed(2), e = +(vat * 0.03 * k).toFixed(2), l = +(vat * 0.02 * k).toFixed(2);
+  return { c, e, l, cj, sum: +(c + e + l).toFixed(2), halved: k === 0.5 };
+}
+function ivSumPool(a, b) {
+  const out = ivLoad(IV_OUT_KEY(CUR_ENT)).filter(x => x.month >= a && x.month <= b);
+  const noinv = ivLoad(IV_NOINV_KEY(CUR_ENT)).filter(x => x.month >= a && x.month <= b);
+  const inn = ivLoad(IV_IN_KEY(CUR_ENT)).filter(x => x.month >= a && x.month <= b);
+  const isSp = x => /专用/.test(String(x.kind || ''));
+  return {
+    spNet: +out.filter(isSp).reduce((s0, x) => s0 + x.amt, 0).toFixed(2),
+    spTax: +out.filter(isSp).reduce((s0, x) => s0 + x.tax, 0).toFixed(2),
+    otNet: +out.filter(x => !isSp(x)).reduce((s0, x) => s0 + x.amt, 0).toFixed(2),
+    otTax: +out.filter(x => !isSp(x)).reduce((s0, x) => s0 + x.tax, 0).toFixed(2),
+    nvNet: +noinv.reduce((s0, x) => s0 + x.net, 0).toFixed(2),
+    nvTax: +noinv.reduce((s0, x) => s0 + x.tax, 0).toFixed(2),
+    inTax: +inn.reduce((s0, x) => s0 + x.tax, 0).toFixed(2),
+    inAmt: +inn.reduce((s0, x) => s0 + x.amt, 0).toFixed(2),
+    inCnt: inn.length, outCnt: out.length, nvCnt: noinv.length,
+  };
+}
+function ivVatData() {
+  const p = ivProf();
+  const y = IV.month.slice(0, 4);
+  if (p.type === 'small') {
+    const q = ivQuarterOf(IV.month);
+    const cur = ivSumPool(q.from, q.to);
+    const ytd = ivSumPool(y + '-01', q.to);
+    const legal = p.rate >= 0.05 ? 0.05 : 0.03;   // 法定征收率：3% 档（含减按1%）或 5% 档
+    const calc = pool => {
+      const saleNet = +(pool.spNet + pool.otNet + pool.nvNet).toFixed(2);
+      const free = saleNet <= 300000;             // 季度 ≤30 万免征（真表口径：小微企业免税销售额）
+      const base = free ? 0 : +(saleNet * legal).toFixed(2);          // 本期应纳税额（按法定率）
+      const cut = free ? 0 : (p.rate < legal ? +(saleNet * (legal - p.rate)).toFixed(2) : 0); // 减征额
+      const vat = +(base - cut).toFixed(2);
+      const freeTax = free ? +(saleNet * legal).toFixed(2) : 0;       // 本期免税额
+      return { saleNet, free, base, cut, vat, freeTax, pool };
+    };
+    const c = calc(cur), t = calc(ytd);
+    return { p, kind: 'small', q, legal, cur: c, ytd: t,
+      saleNet: c.saleNet, saleTax: 0, free: c.free, vat: c.vat,
+      freeSaleTax: +(cur.spTax + cur.otTax + cur.nvTax).toFixed(2),
+      sur: ivSur(c.vat, p), adj: ivAdj('q' + q.y + q.q) };
+  }
+  const m = IV.month;
+  const cur = ivSumPool(m, m);
+  const ytd = ivSumPool(y + '-01', m);
+  const adj = ivAdj(m);
+  const carry = numOf(adj.carry);
+  const mk = (pool, carry0) => {
+    const saleNet = +(pool.spNet + pool.otNet + pool.nvNet).toFixed(2);
+    const saleTax = +(pool.spTax + pool.otTax + pool.nvTax).toFixed(2);
+    const dedPool = +(pool.inTax + carry0).toFixed(2);                // 应抵扣合计=进项+上期留抵
+    const deduct = Math.min(saleTax, dedPool);                        // 实际抵扣
+    const vat = +(saleTax - deduct).toFixed(2);
+    return { saleNet, saleTax, inTax: pool.inTax, dedPool, deduct, vat,
+      carryEnd: +(dedPool - deduct).toFixed(2), pool };
+  };
+  const c = mk(cur, carry), t = mk(ytd, 0);
+  return { p, kind: 'general', cur: c, ytd: t, carry,
+    saleNet: c.saleNet, saleTax: c.saleTax, inTax: c.inTax,
+    deduct: c.deduct, vat: c.vat, carryEnd: c.carryEnd, free: false,
+    sur: ivSur(c.vat, p), adj };
 }
 S['iv-vat'] = () => {
   if (!CUR_ENT) return needEnt('增值税申报表');
-  const d = ivVatData(IV.month);
+  const d = ivVatData();
   const p = d.p;
   const profBar = `<div class="note"><b>税务档案：</b>
-    <select id="ivType"><option value="small" ${p.type === 'small' ? 'selected' : ''}>小规模纳税人</option><option value="general" ${p.type === 'general' ? 'selected' : ''}>一般纳税人</option></select>
-    ${p.type === 'small' ? `征收率 <select id="ivRate">${[0.01, 0.03, 0.05].map(r => `<option value="${r}" ${Math.abs(r - p.rate) < 1e-9 ? 'selected' : ''}>${(r * 100).toFixed(0)}%</option>`).join('')}</select>
-      <label style="margin-left:8px"><input type="checkbox" id="ivHalve" ${p.halve ? 'checked' : ''}> 六税两费减半</label>` : ''}
-    　档案按主体保存。<b>此表是申报草稿，以电子税务局最终生成的为准。</b></div>`;
-  const F = (nm, v, cls) => ({ cls: cls || '', d: [nm, typeof v === 'number' ? money(v) : v] });
-  let rows;
-  if (p.type === 'small') {
-    rows = [
-      F('一、应征增值税不含税销售额（' + (p.rate * 100).toFixed(0) + '% 征收率）', d.free ? 0 : d.saleNet),
-      F('　其中：销项票销售额 / 无票收入', `${d.cnt.out} 张票 ＋ ${d.cnt.noinv} 笔无票`),
-      F('二、免税销售额（月销售额 ≤10 万）', d.free ? d.saleNet : 0),
-      F('三、本期应纳税额', d.vat, 'sum'),
-      F('四、城市维护建设税（7%' + (d.sur.halved ? '，减半' : '') + '）', d.sur.c),
-      F('五、教育费附加（3%' + (d.sur.halved ? '，减半' : '') + '）', d.sur.e),
-      F('六、地方教育附加（2%' + (d.sur.halved ? '，减半' : '') + '）', d.sur.l),
-      F('七、本期应补（退）税费合计', +(d.vat + d.sur.sum).toFixed(2), 'sum'),
+    <select id="ivType"><option value="small" ${p.type === 'small' ? 'selected' : ''}>小规模纳税人（按季）</option><option value="general" ${p.type === 'general' ? 'selected' : ''}>一般纳税人（按月）</option></select>
+    ${p.type === 'small' ? `征收率 <select id="ivRate">${[0.01, 0.03, 0.05].map(r => `<option value="${r}" ${Math.abs(r - p.rate) < 1e-9 ? 'selected' : ''}>${(r * 100).toFixed(0)}%${r === 0.01 ? '（3%减按1%）' : ''}</option>`).join('')}</select>
+      栏次 <select id="ivBiz"><option value="goods" ${p.biz !== 'estate' ? 'selected' : ''}>货物及劳务</option><option value="estate" ${p.biz === 'estate' ? 'selected' : ''}>服务、不动产和无形资产</option></select>` : ''}
+    城建税率 <select id="ivCj">${[[0.07, '7% 市区'], [0.05, '5% 县城建制镇'], [0.01, '1% 其他']].map(x => `<option value="${x[0]}" ${Math.abs((p.cjRate || 0.07) - x[0]) < 1e-9 ? 'selected' : ''}>${x[1]}</option>`).join('')}</select>
+    <label style="margin-left:8px"><input type="checkbox" id="ivHalve" ${p.halve ? 'checked' : ''}> 六税两费减半（小规模/小型微利）</label>
+    　<b>此表是申报草稿，行次学自真实税表，以电子税务局最终生成的为准。</b></div>`;
+  if (p.kind === 'small' || p.type === 'small') {
+    const bizN = p.biz === 'estate' ? '服务、不动产和无形资产' : '货物及劳务';
+    const F = (no, nm, c, t, cls) => ({ cls: cls || '', d: [`<span class="code">${no}</span> ${nm}`, money(c), money(t)] });
+    const cc = d.cur, tt = d.ytd;
+    const rows = [
+      { cls: 'lv1', d: [`<b>一、计税依据</b>（金额均填入「${bizN}」栏）`, '<b>本期数</b>', '<b>本年累计</b>'] },
+      F('1', `应征增值税不含税销售额（${(d.legal * 100).toFixed(0)}%征收率）`, cc.free ? 0 : cc.saleNet, tt.free ? 0 : tt.saleNet),
+      F('2', '　增值税专用发票不含税销售额', cc.free ? 0 : cc.pool.spNet, tt.free ? 0 : tt.pool.spNet),
+      F('3', '　其他增值税发票不含税销售额', cc.free ? 0 : cc.pool.otNet, tt.free ? 0 : tt.pool.otNet),
+      F('9', '（四）免税销售额', cc.free ? cc.saleNet : 0, tt.free ? tt.saleNet : 0),
+      F('10', '　其中：小微企业免税销售额', cc.free ? cc.saleNet : 0, tt.free ? tt.saleNet : 0, 'sum'),
+      { cls: 'lv1', d: ['<b>二、税款计算</b>', '', ''] },
+      F('15', '本期应纳税额', cc.base, tt.base),
+      F('16', '本期应纳税额减征额' + (p.rate < d.legal ? `（减按${(p.rate * 100).toFixed(0)}%）` : ''), cc.cut, tt.cut),
+      F('17', '本期免税额（免税销售额×' + (d.legal * 100).toFixed(0) + '%）', cc.freeTax, tt.freeTax),
+      F('20', '应纳税额合计', cc.vat, tt.vat, 'sum'),
+      F('22', '本期应补（退）税额', cc.vat, tt.vat, 'sum'),
+      { cls: 'lv1', d: ['<b>三、附加税费</b>（附列资料二：计税依据=增值税税额' + (d.sur.halved ? '，六税两费减征50%' : '') + '）', '', ''] },
+      F('23', `城市维护建设税（${String(Math.round(d.sur.cj * 100))}%）`, d.sur.c, d.sur.c),
+      F('24', '教育费附加（3%）', d.sur.e, d.sur.e),
+      F('25', '地方教育附加（2%）', d.sur.l, d.sur.l),
     ];
-  } else {
-    rows = [
-      F('一、销项税额（销项票 ' + d.cnt.out + ' 张 ＋ 无票收入 ' + d.cnt.noinv + ' 笔）', d.saleTax),
-      F('二、进项税额（进项票 ' + d.cnt.in + ' 张）', d.inTax),
-      F('三、上期留抵税额（手工填报）', `<input type="number" step="0.01" id="ivCarry" value="${d.carry || ''}" placeholder="0.00" style="width:130px">`),
-      F('四、实际抵扣税额', d.deduct),
-      F('五、本期应纳税额', d.vat, 'sum'),
-      F('六、期末留抵税额', d.carryEnd),
-      F('七、城建税 / 教育费附加 / 地方教育附加', `${money(d.sur.c)} / ${money(d.sur.e)} / ${money(d.sur.l)}`),
-      F('八、本期应补（退）税费合计', +(d.vat + d.sur.sum).toFixed(2), 'sum'),
-    ];
+    return head('增值税及附加税费申报表（小规模纳税人适用）',
+      `${H(entName())} · 税款所属期 ${d.q.from}-01 至 ${d.q.to} 月末（按季）。销售额 = 销项票 + 无票收入（本季 ${cc.pool.outCnt} 张票 + ${cc.pool.nvCnt} 笔无票）。`, '纳税申报 · 会小规模',
+      `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
+       <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>
+       <button class="btn" data-act="ivVchVat">生成凭证</button>
+       <button class="btn pri" data-act="ivExpVat">导出</button>`)
+      + profBar
+      + kpis([
+        { k: '本季不含税销售额', v: money(cc.saleNet) },
+        { k: '免税', v: cc.free ? '是（季≤30万）' : '否', t: cc.free ? 'g' : '' },
+        { k: '应纳税额合计', v: money(cc.vat) },
+        { k: '附加税费', v: money(d.sur.sum) },
+        { k: '本期应补（退）合计', v: money(+(cc.vat + d.sur.sum).toFixed(2)), t: 'g' },
+      ])
+      + (cc.free ? `<div class="note g"><b>本季销售额 ${money(cc.saleNet)} ≤ 30 万，全额免征</b>：进第 9/10 行「免税销售额-小微企业」，免税额 ${money(cc.freeTax)} = 销售额×${(d.legal * 100).toFixed(0)}%（法定率），仍需按期申报。</div>` : '')
+      + card('申报表（按税局行次）', table([{ t: '栏次 · 项目' }, { t: '本期数', n: 1 }, { t: '本年累计', n: 1 }], rows));
   }
-  return head('增值税及附加税费申报表' + (p.type === 'small' ? '（小规模纳税人适用）' : '（一般纳税人适用）'),
-    `${H(entName())} · 税款所属期 ${IV.month}。销售额 = 销项票 + 无票收入${p.type === 'general' ? '，抵扣 = 进项票 + 上期留抵' : ''}。`, '纳税申报',
+  const cc = d.cur, tt = d.ytd;
+  const F = (no, nm, c, t, cls) => ({ cls: cls || '', d: [`<span class="code">${no}</span> ${nm}`, typeof c === 'string' ? c : money(c), typeof t === 'string' ? t : money(t)] });
+  const rows = [
+    { cls: 'lv1', d: ['<b>销售额</b>', '<b>本月数</b>', '<b>本年累计</b>'] },
+    F('1', '（一）按适用税率计税销售额', cc.saleNet, tt.saleNet),
+    { cls: 'lv1', d: ['<b>附列资料一 · 本期销售明细</b>（销售额 / 销项税额）', '', ''] },
+    F('', '开具增值税专用发票', money(cc.pool.spNet) + ' / ' + money(cc.pool.spTax), ''),
+    F('', '开具其他发票', money(cc.pool.otNet) + ' / ' + money(cc.pool.otTax), ''),
+    F('', '未开具发票（无票收入）', money(cc.pool.nvNet) + ' / ' + money(cc.pool.nvTax), ''),
+    { cls: 'lv1', d: ['<b>税款计算</b>', '', ''] },
+    F('11', '销项税额', cc.saleTax, tt.saleTax),
+    F('12', '进项税额（进项票 ' + cc.pool.inCnt + ' 张）', cc.inTax, tt.inTax),
+    F('13', '上期留抵税额（手工填报）', `<input type="number" step="0.01" id="ivCarry" value="${d.carry || ''}" placeholder="0.00" style="width:120px">`, ''),
+    F('17', '应抵扣税额合计（12+13）', cc.dedPool, ''),
+    F('18', '实际抵扣税额', cc.deduct, tt.deduct),
+    F('19', '应纳税额（11−18）', cc.vat, tt.vat, 'sum'),
+    F('20', '期末留抵税额（17−18）', cc.carryEnd, ''),
+    F('24', '应纳税额合计', cc.vat, tt.vat, 'sum'),
+    F('34', '本期应补（退）税额', cc.vat, tt.vat, 'sum'),
+    { cls: 'lv1', d: ['<b>附加税费</b>（附列资料五：计税依据=增值税税额' + (d.sur.halved ? '，小微六税两费减征50%' : '') + '）', '', ''] },
+    F('39', `城市维护建设税（${String(Math.round(d.sur.cj * 100))}%）`, d.sur.c, d.sur.c),
+    F('40', '教育费附加（3%）', d.sur.e, d.sur.e),
+    F('41', '地方教育附加（2%）', d.sur.l, d.sur.l),
+  ];
+  return head('增值税及附加税费申报表（一般纳税人适用）',
+    `${H(entName())} · 税款所属期 ${IV.month}（按月）。无票收入按真表落「附列资料一·未开具发票」列。`, '纳税申报 · 会一般',
     `<input type="month" id="ivMonth" value="${IV.month}" min="2026-01">
-     <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>\n     <button class="btn" data-act="ivVchVat">生成凭证</button>
+     <a class="btn" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer">电子税务局 ↗</a>
+     <button class="btn" data-act="ivVchVat">生成凭证</button>
      <button class="btn pri" data-act="ivExpVat">导出</button>`)
     + profBar
     + kpis([
-      { k: '不含税销售额', v: money(d.saleNet) },
-      { k: p.type === 'small' ? '应纳增值税' : '销项税额', v: money(p.type === 'small' ? d.vat : d.saleTax) },
-      p.type === 'general' ? { k: '进项税额', v: money(d.inTax) } : { k: '免税', v: d.free ? '是' : '否', t: d.free ? 'g' : '' },
-      { k: '附加税费', v: money(d.sur.sum) },
-      { k: '本期应补（退）合计', v: money(+(d.vat + d.sur.sum).toFixed(2)), t: 'g' },
+      { k: '销项税额', v: money(cc.saleTax) },
+      { k: '进项税额', v: money(cc.inTax) },
+      { k: '应纳税额', v: money(cc.vat) },
+      { k: '期末留抵', v: money(cc.carryEnd) },
+      { k: '本期应补（退）合计', v: money(+(cc.vat + d.sur.sum).toFixed(2)), t: 'g' },
     ])
-    + (d.free && p.type === 'small' ? `<div class="note g"><b>本月不含税销售额 ${money(d.saleNet)} ≤ 10 万，免征增值税</b>（按 2026 年现行小规模优惠）。附加税费基数为零，一并免。仍需按期零申报。</div>` : '')
-    + card('申报表（按税局行次）', table([{ t: '项目' }, { t: '金额', n: 1 }], rows));
+    + card('申报表（按税局行次）', table([{ t: '栏次 · 项目' }, { t: '本月数', n: 1 }, { t: '本年累计', n: 1 }], rows));
 };
 
 /* ============ 企业所得税季度预缴 ============ */
@@ -343,7 +504,7 @@ S['iv-stamp'] = () => {
 /* 只放官方 chinatax.gov.cn 域名的链接——报税入口是钓鱼重灾区，
    别用搜索引擎搜「电子税务局登录」。广州企业在广东省电子税务局申报。 */
 S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申报表是草稿，最终以电子税务局生成并提交的为准。', '纳税申报')
-  + `<div class="note"><b>认准官方域名 chinatax.gov.cn。</b>别用搜索引擎搜「电子税务局登录」——钓鱼站最爱做这个入口。登录用电子营业执照 / 实名账号，证书问题打 12366。</div>`
+  + `<div class="note"><b>认准官方域名 chinatax.gov.cn / gsxt.gov.cn。</b>别用搜索引擎搜「电子税务局登录」——钓鱼站最爱做这个入口。登录用电子营业执照 / 实名账号，证书问题打 12366。</div>`
   + `<div class="bankgrid">
     <a class="bank" href="https://etax.guangdong.chinatax.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#c7000b">
       <span class="bi0">税</span><span class="bn">广东省电子税务局 <span class="bcnt">申报入口</span></span><span class="bu">etax.guangdong.chinatax.gov.cn</span></a>
@@ -353,6 +514,8 @@ S['iv-portal'] = () => head('电子税务局', '报税直达。本系统的申�
       <span class="bi0">总</span><span class="bn">国家税务总局</span><span class="bu">www.chinatax.gov.cn</span></a>
     <a class="bank" href="https://12366.chinatax.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#009944">
       <span class="bi0">12</span><span class="bn">12366 纳税服务平台</span><span class="bu">12366.chinatax.gov.cn</span></a>
+    <a class="bank" href="https://www.gsxt.gov.cn" target="_blank" rel="noopener noreferrer" style="--bc:#b02418">
+      <span class="bi0">工</span><span class="bn">企业信用信息公示系统 <span class="bcnt">工商年报</span></span><span class="bu">www.gsxt.gov.cn</span></a>
   </div>`
   + `<div class="note" style="margin-top:12px"><b>报税顺序建议：</b>票据导进销项票、录无票收入 → 增值税/印花税申报表核对生成凭证 → 所得税申报表 → 打开电子税务局照着草稿填 → 回凭证库把税费凭证过账。</div>`;
 
@@ -482,16 +645,19 @@ function ivPushVoucher(id, date, lines) {
 const IVL = (acct, name, dr, cr, memo) => ({ acct, name, dr: +(+dr).toFixed(2), cr: +(+cr).toFixed(2), memo });
 
 function ivVchVat() {
-  const d = ivVatData(IV.month);
-  const date = ivMonthEnd(IV.month);
-  const memo = IV.month + ' 增值税申报计提';
+  const d = ivVatData();
+  const isQ = d.p.type === 'small';
+  const q = ivQuarterOf(IV.month);
+  const date = ivMonthEnd(isQ ? q.to : IV.month);
+  const memo = (isQ ? q.y + '年Q' + q.q : IV.month) + ' 增值税申报计提';
   const lines = [];
   if (d.p.type === 'small') {
     if (d.free) {
       // 免征：把本月已逐笔计提的销项税额转营业外收入（小企业准则做法）
-      if (d.saleTax > 0.005) {
-        lines.push(IVL('22210107', '应交税费_应交增值税_销项税额', d.saleTax, 0, memo + '（免征，销项税转收入）'));
-        lines.push(IVL('5301', '营业外收入', 0, d.saleTax, memo + '（免征转收入）'));
+      const acc = d.freeSaleTax || 0;   // 本季逐笔已计提的销项税额（票+无票）
+      if (acc > 0.005) {
+        lines.push(IVL('22210107', '应交税费_应交增值税_销项税额', acc, 0, memo + '（免征，销项税转收入）'));
+        lines.push(IVL('5301', '营业外收入', 0, acc, memo + '（免征转收入）'));
       }
     } else if (d.vat > 0.005) {
       lines.push(IVL('5403', '税金及附加', d.sur.sum, 0, memo + '（附加税费）'));
@@ -509,7 +675,7 @@ function ivVchVat() {
       lines.push(IVL('222108', '应交税费_地方教育附加', 0, d.sur.l, memo));
     }
   }
-  ivPushVoucher('__tax_vat_' + IV.month + '__', date, lines);
+  ivPushVoucher('__tax_vat_' + (isQ ? q.y + 'q' + q.q : IV.month) + '__', date, lines);
 }
 function ivVchCit() {
   const q = ivQuarterOf(IV.month);
@@ -545,11 +711,13 @@ function ivVchStamp() {
 document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'ivMonth') { if (t.value >= '2026-01') { IV.month = t.value; go(CURS); } return; }
-  if (t.id === 'ivType' || t.id === 'ivRate' || t.id === 'ivHalve') {
+  if (t.id === 'ivType' || t.id === 'ivRate' || t.id === 'ivHalve' || t.id === 'ivBiz' || t.id === 'ivCj') {
     const p = ivProf();
     if (t.id === 'ivType') p.type = t.value;
     if (t.id === 'ivRate') p.rate = +t.value;
     if (t.id === 'ivHalve') p.halve = t.checked ? 1 : 0;
+    if (t.id === 'ivBiz') p.biz = t.value;
+    if (t.id === 'ivCj') p.cjRate = +t.value;
     ivProfSave(p); go(CURS); return;
   }
   if (t.id === 'ivCarry') { const a = ivAdj(IV.month); a.carry = numOf(t.value); ivAdjSave(IV.month, a); go(CURS); return; }
@@ -596,6 +764,12 @@ document.addEventListener('click', e => {
   if (act === 'ivVchVat') { ivVchVat(); return; }
   if (act === 'ivVchCit') { ivVchCit(); return; }
   if (act === 'ivVchStamp') { ivVchStamp(); return; }
+  if (act === 'ivDyUp') {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.xlsx,.csv';
+    inp.onchange = () => { if (inp.files[0]) ivDyImport(inp.files[0]); };
+    inp.click(); return;
+  }
   if (act === 'ivUpIn' || act === 'ivUpOut') {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.xlsx,.csv,.txt';
@@ -623,17 +797,10 @@ document.addEventListener('click', e => {
     document.querySelectorAll('[data-stamp]').forEach(el => { adj[el.dataset.stamp] = numOf(el.value); });
     ivAdjSave(key, adj); toast('印花税计税金额已保存'); go('iv-stamp');
   } else if (act === 'ivExpVat') {
-    const d = ivVatData(IV.month);
-    const rows = d.p.type === 'small'
-      ? [['项目', '金额'], ['应征增值税不含税销售额', (d.free ? 0 : d.saleNet).toFixed(2)],
-        ['免税销售额', (d.free ? d.saleNet : 0).toFixed(2)], ['本期应纳税额', d.vat.toFixed(2)],
-        ['城建税', d.sur.c.toFixed(2)], ['教育费附加', d.sur.e.toFixed(2)], ['地方教育附加', d.sur.l.toFixed(2)],
-        ['应补（退）合计', (d.vat + d.sur.sum).toFixed(2)]]
-      : [['项目', '金额'], ['销项税额', d.saleTax.toFixed(2)], ['进项税额', d.inTax.toFixed(2)],
-        ['上期留抵', (d.carry || 0).toFixed(2)], ['实际抵扣', d.deduct.toFixed(2)],
-        ['本期应纳税额', d.vat.toFixed(2)], ['期末留抵', d.carryEnd.toFixed(2)],
-        ['附加税费合计', d.sur.sum.toFixed(2)], ['应补（退）合计', (d.vat + d.sur.sum).toFixed(2)]];
-    download(`增值税申报表_${entName()}_${IV.month}.csv`, toCSV(rows)); toast('已导出');
+    const d = ivVatData();
+    const rows = [...document.querySelectorAll('#view table tr')].map(tr => [...tr.children].map(td => td.textContent.trim()));
+    const tag = d.p.type === 'small' ? d.q.y + 'Q' + d.q.q : IV.month;
+    download(`增值税申报表_${entName()}_${tag}.csv`, toCSV(rows)); toast('已导出');
   } else if (act === 'ivExpCit') {
     toast('直接用页面数字抄进电子税务局；导出功能沿用页面表格', 3200);
     const q = ivQuarterOf(IV.month);

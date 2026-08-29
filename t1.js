@@ -396,7 +396,9 @@ async function t1ImpLoad(file) {
     const rows = await XLSXLite.readTable(file);
     const allAlias = Object.keys(T1_IMP_ALIAS).reduce((a, k) => a.concat(T1_IMP_ALIAS[k]), []);
     const headRow = XLSXLite.findHeaderRow(rows, allAlias);
-    T1.imp = { fileName: file.name, rows, headRow, map: t1ImpAutoMap(rows[headRow] || []), offStale: 0 };
+    const curEnt = (typeof CUR_ENT !== 'undefined' && CUR_ENT) ? (ENTITIES.find(x => x.id === CUR_ENT) || {}).full || '' : '';
+    T1.imp = { fileName: file.name, rows, headRow, map: t1ImpAutoMap(rows[headRow] || []),
+      offStale: 0, fixEnt: curEnt, fixName: '' };
     go('t1-imp');
     toast(`读到 ${rows.length} 行，表头定在第 ${headRow + 1} 行`);
   } catch (e) { toast('读取失败：' + e.message, 4200); }
@@ -413,17 +415,27 @@ function t1FindAcc(ent, name, no) {
 function t1ImpPlan() {
   const im = T1.imp;
   const out = { add: [], upd: [], same: [], bad: [], dup: 0, fixed: {}, bals: [], keys: new Set() };
-  if (!im || im.map.ent === undefined || im.map.name === undefined) return out;
+  if (!im || !im.fixEnt || !(im.fixName || '').trim()) return out;
   const seen = new Set();
   im.rows.slice(im.headRow + 1).forEach((r, i) => {
     const cell = k => (im.map[k] === undefined ? '' : String(r[im.map[k]] == null ? '' : r[im.map[k]]).trim());
-    const ent = cell('ent'), name = cell('name'), no = cell('no');
+    const ent = im.fixEnt, name = im.fixName.trim(), no = cell('no');   // 主体/账户名页面直选，整个文件归同一账户
     const blank = !r.some(c => String(c == null ? '' : c).trim());
     if (!ent || !name) {
       if (!blank) out.bad.push({ no: im.headRow + i + 2, ent, name, why: !ent ? '缺主体' : '缺账户名' });
       return;
     }
     const key = t1Norm(ent) + '' + t1Norm(name);
+    // 余额先收再做账户去重——银行对账单每天一行余额，账户只建一次、余额要逐日收；
+    // 同一天多行时取文件中靠后的那行（记完排在后面的余额更接近日终）
+    if (im.map.bal !== undefined) {
+      const v0 = Number(cell('bal').replace(/[,，¥￥]/g, ''));
+      if (cell('bal') !== '' && !isNaN(v0)) {
+        const d0 = im.map.date !== undefined && cell('date') ? normDate(cell('date')) : T1.date;
+        out._balMap = out._balMap || {};
+        out._balMap[key + '|' + d0] = { key, ent, name, no, date: d0, val: v0 };
+      }
+    }
     if (seen.has(key)) { out.dup++; return; }
     seen.add(key); out.keys.add(key);
 
@@ -443,15 +455,9 @@ function t1ImpPlan() {
       if (chg.length) out.upd.push({ id: hit.id, ent, name, no, type, chg });
       else out.same.push({ ent, name });
     }
-    // 余额列：有值才导，没有就只导台账
-    if (im.map.bal !== undefined) {
-      const v = Number(cell('bal').replace(/[,，¥￥]/g, ''));
-      if (cell('bal') !== '' && !isNaN(v)) {
-        const d = im.map.date !== undefined && cell('date') ? normDate(cell('date')) : T1.date;
-        out.bals.push({ key, ent, name, no, date: d, val: v });
-      }
-    }
   });
+  out.bals = Object.values(out._balMap || {});
+  delete out._balMap;
   return out;
 }
 
@@ -769,16 +775,29 @@ S['t1-imp'] = () => {
   };
   const opts = k => header.map((h, j) =>
     `<option value="${j}" ${im.map[k] === j ? 'selected' : ''}>第${j + 1}列 ${H(String(h || '(空)').slice(0, 14))}${H(sampleOf(j))}</option>`).join('');
-  const mapRows = T1_IMP_FIELDS.map(([k, n, must]) => [
-    H(n) + (must ? ' <span class="red">*</span>' : ''),
-    `<select data-t1map="${k}"><option value="">— 不使用 —</option>${opts(k)}</select>`,
-    im.map[k] !== undefined ? `<span class="mut">${H(String(preview[0] && preview[0][im.map[k]] || '').slice(0, 22))}</span>` : '<span class="mut">—</span>',
-  ]);
+  // 主体与账户名不从文件列里找——银行对账单里根本没有这两列（负责人拍板改自选）。
+  // 主体下拉选、账户名手填，整个文件的行都归到这一个账户上。
+  const mapRows = T1_IMP_FIELDS.map(([k, n, must]) => {
+    if (k === 'ent') return [
+      H(n) + ' <span class="red">*</span>',
+      `<select data-t1fix="ent"><option value="">— 选主体 —</option>${ENTITIES.map(e =>
+        `<option value="${H(e.full)}" ${im.fixEnt === e.full ? 'selected' : ''}>${H(e.full)}</option>`).join('')}</select>`,
+      '<span class="mut">页面直选，不取文件列</span>'];
+    if (k === 'name') return [
+      H(n) + ' <span class="red">*</span>',
+      `<input data-t1fix="name" value="${H(im.fixName || '')}" placeholder="如 工行基本户" style="min-width:180px">`,
+      '<span class="mut">页面直填，不取文件列</span>'];
+    return [
+      H(n) + (must ? ' <span class="red">*</span>' : ''),
+      `<select data-t1map="${k}"><option value="">— 不使用 —</option>${opts(k)}</select>`,
+      im.map[k] !== undefined ? `<span class="mut">${H(String(preview[0] && preview[0][im.map[k]] || '').slice(0, 22))}</span>` : '<span class="mut">—</span>',
+    ];
+  });
   const headOpts = im.rows.slice(0, Math.min(im.rows.length, 12)).map((r, i) =>
     `<option value="${i}" ${i === im.headRow ? 'selected' : ''}>第 ${i + 1} 行：${H(r.filter(Boolean).slice(0, 4).join(' | ').slice(0, 46))}</option>`).join('');
 
   const p = t1ImpPlan();
-  const ready = im.map.ent !== undefined && im.map.name !== undefined;
+  const ready = !!(im.fixEnt && (im.fixName || '').trim());
   const cut = (arr, n) => arr.slice(0, n).map(x => `${H(x.ent)} · ${H(x.name)}`).join('、')
     + (arr.length > n ? ` … 等 ${arr.length} 户` : '');
 
@@ -791,7 +810,7 @@ S['t1-imp'] = () => {
       { k: '无变化', v: String(p.same.length), u: '户' },
       { k: '带余额', v: String(p.bals.length), u: '条', t: p.bals.length ? 'g' : '' },
       { k: '问题行', v: String(p.bad.length), u: '行', t: p.bad.length ? 'c' : 'g' },
-    ]) : '<div class="note c"><b>还不能继续：</b>「主体」和「账户 / 平台」两列必须对应上。</div>')
+    ]) : '<div class="note c"><b>还不能继续：</b>上面的「主体」要选、「账户 / 平台」要填。</div>')
     + (ready && p.add.length ? `<div class="note g"><b>会新增 ${p.add.length} 户：</b>${cut(p.add, 8)}</div>` : '')
     + (ready && p.upd.length ? `<div class="note w"><b>会更新 ${p.upd.length} 户</b>（复用原编号，历史余额不丢）：${
         p.upd.slice(0, 6).map(u => `${H(u.ent)} · ${H(u.name)}（${u.chg.join('、')}）`).join('；')}${p.upd.length > 6 ? ' …' : ''}</div>` : '')
@@ -959,6 +978,11 @@ document.addEventListener('change', e => {
     go('t1-imp'); return;
   }
   if (e.target.id === 't1off' && T1.imp) { T1.imp.offStale = e.target.checked ? 1 : 0; go('t1-imp'); return; }
+  if (e.target.dataset && e.target.dataset.t1fix && T1.imp) {
+    if (e.target.dataset.t1fix === 'ent') T1.imp.fixEnt = e.target.value;
+    else T1.imp.fixName = e.target.value;
+    go('t1-imp'); return;
+  }
   if (e.target.dataset && e.target.dataset.t1map && T1.imp) {
     const k = e.target.dataset.t1map;
     if (e.target.value === '') delete T1.imp.map[k]; else T1.imp.map[k] = +e.target.value;

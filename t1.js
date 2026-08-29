@@ -658,8 +658,8 @@ S['t1-ent'] = () => {
     : `<div class="note ${e.rateWarn ? 'c' : 'g'}"><b>较上日变动率 ${e.rate >= 0 ? '+' : ''}${e.rate.toFixed(2)}% → ${e.rateWarn ? '预警' : '正常'}。</b>
        算法：（今日合计 ${money(e.bal)} − 上一日 ${H(prevD)} 合计 ${money(e.prev)}）÷ ${money(e.prev)}；预警阈值 ±${T1_CFG.rateTh}%。</div>`;
 
-  // 物证内联：导入过的每一笔直接列在下面。单页最多内联 300 笔防卡死，
-  // 超了停在整天边界、如实标出还剩多少，一键去该账户的全量页。
+  // 物证内联：导入过的每一笔直接列在下面。每户先内联约 300 笔防大户卡死——
+  // 软上限，凑够就停在整天边界（一天绝不拆半），如实标出还剩多少，一键去该账户的全量页。
   const INLINE_MAX = 300;
   const txnAccs = e.accs.filter(a => txns[a.id] && Object.keys(txns[a.id]).length);
   let totDays = 0, totRows = 0;
@@ -668,7 +668,7 @@ S['t1-ent'] = () => {
       prefix: txnAccs.length > 1 ? a.name + ' · ' : '' });
     totDays += tb.totalDays; totRows += tb.totalRows;
     return tb.html + (tb.rows < tb.totalRows
-      ? `<div class="note w"><b>${H(a.name)} 还有 ${tb.totalDays - tb.days} 天 ${tb.totalRows - tb.rows} 笔没在本页展开</b>（单页最多内联 ${INLINE_MAX} 笔，防止页面过长）。
+      ? `<div class="note w"><b>${H(a.name)} 还有 ${tb.totalDays - tb.days} 天 ${tb.totalRows - tb.rows} 笔没在本页展开</b>（每户先内联约 ${INLINE_MAX} 笔、停在整天边界，防止页面过长）。
          <span class="lnk" data-t1txn="${a.id}">查看该账户全部 ${tb.totalDays} 天 ${tb.totalRows} 笔 →</span></div>`
       : '');
   }).join('');

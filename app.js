@@ -405,7 +405,8 @@ const T2 = {
   ent: '', entId: '', line: '', acctId: '', acctNo: '', vchWord: '记', defProj: '',
   balPush: null,   // 余额回写结果，步骤 3 里摊开说
   sniffNo: null, autoBind: null,   // 上传时从文件里嗅到的卡号 / 自动认账户的结果
-  result: null, tab: 'ok'
+  result: null, tab: 'ok',
+  logId: null,   // 本批流水在处理记录里的那一行，例外处理/导出都更新它
 };
 
 /* 表头别名 */
@@ -630,14 +631,23 @@ function runRules() {
   saveRules(T2.entId, RULES);
 }
 
-/* 导出留痕：两个导出口径共用一份处理记录 */
-function t2LogExport() {
+/* 处理留痕：转换一完成就写一条「未导出」记录（导入了但没导出也要有痕）；
+   同一批流水后续的例外处理、导出都更新这一条，不另起新行。
+   exported 传 1 表示这次动作是导出。 */
+function t2Log(exported) {
   const { ok, ex, total } = T2.result;
-  addLog({
-    time: new Date().toLocaleString('zh-CN'), file: T2.file.name, ent: T2.ent,
-    total, ok: ok.length, ex: ex.length,
-    rate: total ? Math.round(ok.length / total * 100) : 0, exported: 1
-  });
+  const stat = { total, ok: ok.length, ex: ex.length, rate: total ? Math.round(ok.length / total * 100) : 0 };
+  const l = loadLog();
+  const e = T2.logId && l.find(x => x.id === T2.logId);
+  if (e) { Object.assign(e, stat, exported ? { exported: 1 } : null); saveLog(l); }
+  else {
+    // 找不到本批的记录（老会话、或中途清空过记录）就现补一条
+    T2.logId = uid();
+    addLog(Object.assign({
+      id: T2.logId, time: new Date().toLocaleString('zh-CN'),
+      file: T2.file ? T2.file.name : '', ent: T2.ent, exported: exported ? 1 : 0,
+    }, stat));
+  }
 }
 
 /* ============ 凭证生成 ============ */
@@ -870,9 +880,9 @@ S['tool-rules'] = () => {
 
 S['tool-log'] = () => {
   const log = loadLog();
-  if (!log.length) return head('处理记录', '每次转换都会留痕：谁、什么时候、处理了多少笔、导出了什么。', '工具箱 · T2')
+  if (!log.length) return head('处理记录', '每次转换都会留痕：什么时候、哪份文件、处理了多少笔、有没有导出。', '工具箱 · T2')
     + `<div class="soonbox"><div class="si">▷</div><h3>还没有处理记录</h3><p>用 T2 转换一次银行流水后，这里会记录下来。</p></div>`;
-  return head('处理记录', '每次转换都会留痕：谁、什么时候、处理了多少笔、导出了什么。', '工具箱 · T2',
+  return head('处理记录', '每次转换都会留痕：什么时候、哪份文件、处理了多少笔、有没有导出。', '工具箱 · T2',
     `<button class="btn" data-act="clearLog">清空记录</button>`)
     + card('记录', table(
       [{ t: '时间' }, { t: '文件' }, { t: '主体' }, { t: '总笔数', n: 1 }, { t: '已匹配', n: 1 }, { t: '例外', n: 1 }, { t: '匹配率' }, { t: '导出' }],
@@ -1574,7 +1584,7 @@ document.addEventListener('click', e => {
   if (!a) return;
   const act = a.dataset.act;
 
-  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {}, balPush: null, txnPush: null, sniffNo: null, autoBind: null }); go('t2'); }
+  if (act === 't2reset') { Object.assign(T2, { step: 1, rows: null, result: null, file: null, map: {}, balPush: null, txnPush: null, sniffNo: null, autoBind: null, logId: null }); go('t2'); }
   else if (act === 't2run') {
     T2.entId = ($('entSel2') || {}).value || T2.entId;
     const ei = ENTITIES.find(x => x.id === T2.entId);
@@ -1589,6 +1599,7 @@ document.addEventListener('click', e => {
       toast('「' + T2.ent + '」还没有规则库，全部会进例外', 4200);
     }
     runRules(); t2PushBalance(); t2PushTxns();
+    T2.logId = null; t2Log(0);   // 每跑一次转换新起一条记录，导入即留痕
     T2.step = 3; T2.tab = T2.result.ex.length ? 'ex' : 'ok'; go('t2');
   }
   else if (act === 't2ex') { T2.step = 4; go('t2'); }
@@ -1634,6 +1645,7 @@ document.addEventListener('click', e => {
     T2.result.ok.sort((x, y) => x.no - y.no);
     T2.result.ex = still;
     if (added) saveRules(T2.entId, RULES);
+    t2Log(0);   // 例外处理完，记录里的匹配数要跟着变
     toast(`已处理 ${fixed} 笔${added ? `，新增 ${added} 条规则` : ''}`);
     T2.step = 5; go('t2');
   }
@@ -1652,13 +1664,13 @@ document.addEventListener('click', e => {
     const rows = [KD_HEADER].concat(kingdeeRows());
     const period = (T2.result.ok[0] || {}).date ? T2.result.ok[0].date.slice(0, 7) : new Date().toISOString().slice(0, 7);
     downloadBlob(`凭证导入_${T2.ent}_${period}.xlsx`, XLSXWrite.build([{ name: '凭证模版', rows }]));
-    t2LogExport();
+    t2Log(1);
     toast('金蝶凭证 xlsx 已下载，处理记录已留痕');
   }
   else if (act === 'dlVoucher') {
     const hdr = ['日期', '凭证字', '凭证号', '摘要', '科目编码', '科目名称', '借方金额', '贷方金额', '主体', '业务线', '项目', '合同号', '对方户名', '流水号', '账号'];
     download(`凭证明细_${T2.ent}_${new Date().toISOString().slice(0, 10)}.csv`, toCSV([hdr].concat(vouchers())));
-    t2LogExport();
+    t2Log(1);
     toast('凭证明细 CSV 已下载，处理记录已留痕');
   }
   else if (act === 'toLedger') {

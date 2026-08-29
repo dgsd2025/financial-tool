@@ -71,6 +71,9 @@ const DOMS = [
       ['--报表中心'],
       ['rp-home', '报表首页'], ['rp-bs', '资产负债表'], ['rp-pl', '利润表'],
       ['rp-cf', '现金流量表'], ['rp-exp', '费用明细表'],
+      ['--合并报表'],
+      ['cs-set', '合并设置'], ['cs-reg', '内部交易登记'], ['cs-elim', '抵消分录'],
+      ['cs-bs', '合并资产负债表'], ['cs-pl', '合并利润表'], ['cs-cf', '合并现金流量表'],
       ['--其他'],
       ['p-stock', '进销存台账'], ['p-count', '月末盘点'], ['p-close', '月结检查单'],
       ['p-tax-cal', '申报日历'] ] },
@@ -1433,7 +1436,7 @@ function renderNav() {
 }
 function go(id) {
   if (/^t[1234]($|-)/.test(id) || id.startsWith('tool-')) CURD = 'tools';
-  else if (id.startsWith('ac-') || id.startsWith('rp-')) CURD = 'close';
+  else if (id.startsWith('ac-') || id.startsWith('rp-') || id.startsWith('cs-')) CURD = 'close';
   else if (id.startsWith('iv-')) CURD = 'inv';
   else if (id.startsWith('bs-')) CURD = 'base';
   else {
